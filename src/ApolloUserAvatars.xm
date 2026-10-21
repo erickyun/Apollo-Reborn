@@ -889,6 +889,19 @@ static UIFont *ApolloProfileClassicNameFont(void) {
     if (!sProfileHeaderImmersive) {
         [self apollo_applyClassicIdentityOverrides:&identity forWidth:width];
     }
+    if (sHideAllUserAvatars) {
+        // Without a portrait, don't reserve its 96pt height (or the
+        // Classic leading column). Keep display name / handle full-width
+        // and start directly below the banner, regardless of density.
+        CGFloat bannerHeight = [self apollo_bannerHeight];
+        CGFloat nameY = bannerHeight + (bannerHeight > 0 ? 10.0 : 14.0);
+        identity.avatarFrame = CGRectZero;
+        identity.nameFrame = CGRectMake(identity.bodyX, nameY,
+                                        identity.bodyWidth, identity.nameFrame.size.height);
+        identity.subnameFrame = CGRectMake(identity.bodyX, CGRectGetMaxY(identity.nameFrame) + 1.0,
+                                           identity.bodyWidth, identity.subnameFrame.size.height);
+        identity.bodyY = CGRectGetMaxY(identity.subnameFrame) + 12.0;
+    }
     return identity;
 }
 
