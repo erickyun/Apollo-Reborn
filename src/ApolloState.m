@@ -47,6 +47,7 @@ BOOL sProxyImgurDDG = NO;
 BOOL sImgurAlbumFallbackProxies = YES;
 BOOL sShowUserAvatars = NO;
 BOOL sHideAllUserAvatars = NO;
+BOOL sHideFeedPostImages = NO; // feed-only still-image/gallery previews (not post details)
 BOOL sUseProfileAvatarTabIcon = NO;
 BOOL sHideTabBarTitles = NO;
 BOOL sShowDetailedProfiles = YES;   // effective default ON via registerDefaults (UDKeyShowDetailedProfiles)
