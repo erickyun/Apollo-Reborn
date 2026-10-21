@@ -1,8 +1,10 @@
 // ApolloHideFeedPostImages.xm
 //
-// Collapses still-image, gallery and compact-thumbnail previews in the post
-// feed WITHOUT changing RDKLink data. Opening the post uses
-// CommentsHeaderCellNode, whose media layout remains untouched.
+// Text-only feed mode: collapses images, galleries, videos and link preview
+// cards, including compact thumbnails, WITHOUT changing RDKLink data.
+// The author/title/meta nodes live outside RichMediaNode. When a text post
+// includes a selfPostPreviewNode, retain that text node in the feed layout.
+// Opening a post uses CommentsHeaderCellNode, whose media stays untouched.
 //
 // Scope is explicit: LargePostCellNode marks its RichMediaNode and any
 // crosspost media node before Texture measures them. A comments header or a
@@ -16,22 +18,25 @@
 #import "ApolloSwiftRuntime.h"
 #import "ApolloTextureDecls.h"
 #import "ApolloClasses.h"
+#import "Tweak.h" // RDKLink.selfPost
 
 static char kApolloFeedOnlyRichMediaKey;
 static char kApolloCompactThumbOriginalSizeKey;
 static char kApolloCompactThumbOriginalMaxSizeKey;
 
-// Shared Texture layout specs must not be reused between parents; produce a
-// fresh, zero-child vertical stack for each measure. Using the runtime Class
-// avoids linking against Apollo's private Texture framework.
-static id ApolloFeedEmptyImageSpec(void) {
+// Only add genuine self-post text content as a child. Media and link-card
+// children are excluded from the resulting layout spec entirely, so no
+// picture/video placeholder height survives in the feed. Creating a new
+// Texture spec for each measurement avoids shared-layout-tree ownership.
+static id ApolloFeedTextOnlySpec(id textPreviewNode) {
     Class stackClass = ApolloClassASStackLayoutSpec;
     if (!stackClass) return nil;
+    NSArray *children = textPreviewNode ? @[ textPreviewNode ] : @[];
     return [(id)stackClass stackLayoutSpecWithDirection:0
                                               spacing:0
                                        justifyContent:0
                                            alignItems:0
-                                             children:@[]];
+                                             children:children];
 }
 
 static void ApolloFeedMarkRichMedia(id richMediaNode) {
@@ -116,17 +121,19 @@ static void ApolloFeedSetCompactThumbSizing(id node, BOOL hidden) {
         return %orig;
     }
 
-    // Hide still pictures, albums and linked image previews, but leave
-    // feed video players and self-post text alone. Text-only RichMediaNodes
-    // have no native image nodes, and embedded self-post hero thumbnails are
-    // independently suppressed in ApolloFeedTextPostThumbnails.xm.
-    id imageNode = ApolloObjectIvar(self, "thumbnailNode");
-    id albumNode = ApolloObjectIvar(self, "albumThumbnailsNode");
-    id videoNode = ApolloObjectIvar(self, "videoNode");
-    if ((!imageNode && !albumNode) || videoNode) return %orig;
-
-    id empty = ApolloFeedEmptyImageSpec();
-    return empty ?: %orig;
+    // For image, gallery, video and external-link posts, all of this
+    // RichMediaNode is presentation media (the post's title and vote/comment
+    // text are sibling nodes in the LargePostCellNode). Removing the children
+    // hides both the visible preview and its reserved height.
+    //
+    // For text/self posts, selfPostPreviewNode is the readable body excerpt,
+    // and MUST be preserved even when the same RichMediaNode also owns an
+    // embedded-image hero, a video or linkButtonNode.
+    RDKLink *link = (RDKLink *)ApolloObjectIvar(self, "link");
+    id bodyText = (link && link.selfPost)
+        ? ApolloObjectIvar(self, "selfPostPreviewNode") : nil;
+    id textOnly = ApolloFeedTextOnlySpec(bodyText);
+    return textOnly ?: %orig;
 }
 
 %end
@@ -136,7 +143,7 @@ static void ApolloFeedSetCompactThumbSizing(id node, BOOL hidden) {
 - (id)layoutSpecThatFits:(struct ApolloTextureSizeRange)range {
     ApolloFeedSetCompactThumbSizing(self, sHideFeedPostImages);
     if (sHideFeedPostImages) {
-        id empty = ApolloFeedEmptyImageSpec();
+        id empty = ApolloFeedTextOnlySpec(nil);
         if (empty) return empty;
     }
     return %orig;
