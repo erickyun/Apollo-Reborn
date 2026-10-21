@@ -1956,7 +1956,7 @@ typedef NS_ENUM(NSInteger, Tag) {
 
     ApolloSettingsRow *hideFeedImages =
         [ApolloSettingsRow switchRowWithID:@"feed.hideImagePreviews"
-                                     title:@"Hide Images in Feed"
+                                     title:@"Hide Media in Feed"
                                       isOn:^BOOL { return sHideFeedPostImages; }
                                   onToggle:^(UISwitch *sender) {
             sHideFeedPostImages = sender.on;
@@ -2028,7 +2028,7 @@ typedef NS_ENUM(NSInteger, Tag) {
     devvitFeedPosts.visible = ^BOOL { return [[NSUserDefaults standardUserDefaults] boolForKey:UDKeyDevvitInteractivePosts]; };
 
     return [ApolloSettingsSection sectionWithTitle:@"Feed"
-                                            footer:@"Hide Images in Feed: hide picture and gallery previews in Home/subreddit feeds. Open a post to see its images as usual. Feed videos are unaffected.\n\nFeed Video Scrubber: drag the bar under a feed video to scrub it.\n\nSmoother Video Scrolling: prepares feed videos in the background and lets video posts finish drawing right after they scroll in instead of holding the frame for them. Turn off to get Apollo's original behavior back.\n\nForget Forward Swipe After Scrolling: once you've scrolled a few posts on, a forward swipe won't reopen the post you came back from.\n\nLive Interactive Posts: shows live scores, polls, brackets and other interactive posts instead of placeholder text. Show in Feed adds them to the feed as well as comments."
+                                            footer:@"Hide Media in Feed: show only text in Home/subreddit feeds by hiding picture, gallery, video, and external-link previews. Open the post to view its media as usual.\n\nFeed Video Scrubber: drag the bar under a feed video to scrub it.\n\nSmoother Video Scrolling: prepares feed videos in the background and lets video posts finish drawing right after they scroll in instead of holding the frame for them. Turn off to get Apollo's original behavior back.\n\nForget Forward Swipe After Scrolling: once you've scrolled a few posts on, a forward swipe won't reopen the post you came back from.\n\nLive Interactive Posts: shows live scores, polls, brackets and other interactive posts instead of placeholder text. Show in Feed adds them to the feed as well as comments."
                                               rows:@[ hideFeedImages, textPostThumbnails, infoRow, feedScrubber, videoScrollSmoothing, forwardSwipeForget, blockAnnouncements, devvitPosts, devvitFeedPosts ]];
 }
 
