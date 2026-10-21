@@ -65,8 +65,10 @@ static void ApolloSuppressAuthorInCell(id cell, BOOL isComment) {
 }
 
 static BOOL ApolloIsMarkedHiddenAuthor(id node) {
-    return ApolloHideUsernamesEnabled() &&
-        [objc_getAssociatedObject(node, &kApolloHiddenAuthorTextNodeKey) boolValue];
+    // Most text nodes are unrelated: avoid a defaults lookup for every title,
+    // comment body, flair, and button text assignment.
+    return [objc_getAssociatedObject(node, &kApolloHiddenAuthorTextNodeKey) boolValue] &&
+           ApolloHideUsernamesEnabled();
 }
 
 // Texture uses both text-node implementations. Do not touch ordinary nodes:
