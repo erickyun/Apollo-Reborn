@@ -13,10 +13,17 @@
 
 // Keep in sync with the switch in ApolloSettingsNativeInjections.xm.
 static NSString *const kApolloHideUsernamesKey = @"ApolloHidePostCommentUsernames";
+// Independent opt-in: remove only u/<name> from post info and crosspost credits.
+// Kept separate from the existing switch that blanks standalone author titles.
+static NSString *const kApolloHidePostInfoUsernamesKey = @"ApolloHideUsernamesInPostInfo";
 static char kApolloHiddenAuthorTextNodeKey;
 
 static BOOL ApolloHideUsernamesEnabled(void) {
     return [[NSUserDefaults standardUserDefaults] boolForKey:kApolloHideUsernamesKey];
+}
+
+static BOOL ApolloHidePostInfoUsernamesEnabled(void) {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:kApolloHidePostInfoUsernamesKey];
 }
 
 // Metadata labels can mix community and author, e.g. "in piracy · u/name".
@@ -123,7 +130,7 @@ static void ApolloMarkPostInfoSubtree(id node,
 }
 
 static void ApolloSuppressPostMetadataInCell(id cell) {
-    if (!ApolloHideUsernamesEnabled() || !cell) return;
+    if (!ApolloHidePostInfoUsernamesEnabled() || !cell) return;
     id postInfo = ApolloObjectIvar(cell, "postInfoNode");
     if (postInfo) ApolloMarkPostInfoSubtree(postInfo, [NSMutableSet set], 0);
 }
@@ -160,13 +167,17 @@ static void ApolloSuppressAuthorButton(id button) {
     NSAttributedString *current = [textNode respondsToSelector:@selector(attributedText)]
         ? ((id (*)(id, SEL))objc_msgSend)(textNode, @selector(attributedText))
         : nil;
-    // Some Apollo layouts combine "in piracy" and "u/author" in one title.
-    // Preserve the community substring instead of hiding the whole button.
-    if (ApolloAuthorTitleIncludesCommunity(current.string)) {
+    // Preserve the original Hide Author Usernames behavior on its own:
+    // blank the full author title, even for a combined author/community row.
+    // When the SECOND toggle is enabled too, keep that row's community text
+    // and strip only its u/<name> segment instead.
+    if (ApolloHidePostInfoUsernamesEnabled() &&
+        ApolloAuthorTitleIncludesCommunity(current.string)) {
         ApolloMarkPostMetadataTextNode(textNode);
         return;
     }
-    // Ordinary standalone author label: hide its entire title.
+    // Existing full-hide switch blanks standalone author labels. With the
+    // second switch off it also blanks a combined author/community label.
     // Future async setAttributedText: updates remain hidden via the hook.
     objc_setAssociatedObject(textNode, &kApolloHiddenAuthorTextNodeKey, @YES,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -255,6 +266,12 @@ static void ApolloSuppressCrosspostSubtree(id node,
     ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorNode"));
     ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorButtonNode"));
     ApolloSuppressCrosspostCreditNode(node);
+    // The selective toggle also covers author tokens inside the crosspost's
+    // nested post-info row, without touching the original post title/body.
+    if (ApolloHidePostInfoUsernamesEnabled()) {
+        id nestedInfo = ApolloObjectIvar(node, "postInfoNode");
+        if (nestedInfo) ApolloMarkPostInfoSubtree(nestedInfo, [NSMutableSet set], 0);
+    }
 
     const char *nested[] = {
         "postInfoNode", "originalPostInfoNode", "crosspostInfoNode",
@@ -275,7 +292,7 @@ static void ApolloSuppressCrosspostSubtree(id node,
 }
 
 static void ApolloSuppressCrosspostInCell(id cell) {
-    if (!ApolloHideUsernamesEnabled()) return;
+    if (!ApolloHideUsernamesEnabled() && !ApolloHidePostInfoUsernamesEnabled()) return;
     id crosspost = ApolloObjectIvar(cell, "crosspostNode");
     if (crosspost) {
         ApolloSuppressCrosspostSubtree(crosspost, [NSMutableSet set], 0);
@@ -297,7 +314,8 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
         // A title node may not have text at its first measure. If a later
         // async bind inserts a composite author+community label, do not wipe
         // out the visible "in piracy" / "r/piracy" portion.
-        if (ApolloAuthorTitleIncludesCommunity(text.string)) {
+        if (ApolloHidePostInfoUsernamesEnabled() &&
+            ApolloAuthorTitleIncludesCommunity(text.string)) {
             NSAttributedString *redacted = ApolloRedactPostMetadataUsername(text);
             %orig(redacted ?: text);
         } else {
@@ -307,7 +325,7 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
     }
     // Some post metadata nodes are composite: preserve r/subreddit or
     // "in subreddit", removing only the u/author span.
-    if (ApolloHideUsernamesEnabled() &&
+    if (ApolloHidePostInfoUsernamesEnabled() &&
         [objc_getAssociatedObject(self, &kApolloPostMetadataTextNodeKey) boolValue]) {
         NSAttributedString *redacted = ApolloRedactPostMetadataUsername(text);
         if (redacted) {
@@ -315,7 +333,7 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
             return;
         }
     }
-    if (ApolloHideUsernamesEnabled() &&
+    if ((ApolloHideUsernamesEnabled() || ApolloHidePostInfoUsernamesEnabled()) &&
         [objc_getAssociatedObject(self, &kApolloCrosspostCreditNodeKey) boolValue]) {
         NSAttributedString *redacted = ApolloRedactCrosspostCredit(text);
         if (redacted) {
@@ -333,7 +351,8 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
         // A title node may not have text at its first measure. If a later
         // async bind inserts a composite author+community label, do not wipe
         // out the visible "in piracy" / "r/piracy" portion.
-        if (ApolloAuthorTitleIncludesCommunity(text.string)) {
+        if (ApolloHidePostInfoUsernamesEnabled() &&
+            ApolloAuthorTitleIncludesCommunity(text.string)) {
             NSAttributedString *redacted = ApolloRedactPostMetadataUsername(text);
             %orig(redacted ?: text);
         } else {
@@ -343,7 +362,7 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
     }
     // Some post metadata nodes are composite: preserve r/subreddit or
     // "in subreddit", removing only the u/author span.
-    if (ApolloHideUsernamesEnabled() &&
+    if (ApolloHidePostInfoUsernamesEnabled() &&
         [objc_getAssociatedObject(self, &kApolloPostMetadataTextNodeKey) boolValue]) {
         NSAttributedString *redacted = ApolloRedactPostMetadataUsername(text);
         if (redacted) {
@@ -351,7 +370,7 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
             return;
         }
     }
-    if (ApolloHideUsernamesEnabled() &&
+    if ((ApolloHideUsernamesEnabled() || ApolloHidePostInfoUsernamesEnabled()) &&
         [objc_getAssociatedObject(self, &kApolloCrosspostCreditNodeKey) boolValue]) {
         NSAttributedString *redacted = ApolloRedactCrosspostCredit(text);
         if (redacted) {
