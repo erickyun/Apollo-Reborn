@@ -37,6 +37,8 @@
 #import <objc/runtime.h>
 
 #import "ApolloCommon.h"
+#import "ApolloState.h"
+#import "UserDefaultConstants.h"
 #import "settings/ApolloSettingsGeneralTable.h"
 #import "settings/ApolloSettingsRouter.h"
 #import "ApolloThemeRuntime.h"
@@ -95,6 +97,7 @@ static NSString *const kApolloHideAuthorsPrefKey = @"ApolloHidePostCommentUserna
 @interface ApolloHideAuthorsToggleTarget : NSObject
 + (instancetype)sharedTarget;
 - (void)visibilityChanged:(UISwitch *)sender;
+- (void)avatarVisibilityChanged:(UISwitch *)sender;
 @end
 
 @implementation ApolloHideAuthorsToggleTarget
@@ -108,6 +111,19 @@ static NSString *const kApolloHideAuthorsPrefKey = @"ApolloHidePostCommentUserna
     [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kApolloHideAuthorsPrefKey];
     // Native post feeds refresh via this same appearance notification.
     // Open comment threads should be reopened to rebuild their text nodes.
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"com.christianselig.PostCellAppearanceUpdated" object:nil];
+}
+
+- (void)avatarVisibilityChanged:(UISwitch *)sender {
+    sHideAllUserAvatars = sender.on;
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:UDKeyHideAllUserAvatars];
+    // Ask native profile headers, tab bar and inline avatar cell binders to
+    // refresh. Existing web Chat/Modmail documents adopt the setting on reopen.
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"ApolloUserAvatarsToggleChangedNotification" object:nil];
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"ApolloProfileTabAvatarIconChangedNotification" object:nil];
     [[NSNotificationCenter defaultCenter]
         postNotificationName:@"com.christianselig.PostCellAppearanceUpdated" object:nil];
 }
@@ -129,6 +145,34 @@ static UITableViewCell *ApolloHideAuthorsSettingsCell(UIViewController *vc, UITa
     }
     [(UISwitch *)cell.accessoryView setOn:
         [NSUserDefaults.standardUserDefaults boolForKey:kApolloHideAuthorsPrefKey] animated:NO];
+    if (donor) {
+        cell.backgroundColor = donor.backgroundColor;
+        cell.textLabel.font = donor.textLabel.font;
+        cell.textLabel.textColor = donor.textLabel.textColor;
+    }
+    return cell;
+}
+
+// Independent from the existing "Show User Profile Pictures" toggle: the
+// preference is a temporary hide-only override and never modifies the user's
+// selected avatar layout/style choices.
+static const void *kApolloHideAllAvatarsCellKey = &kApolloHideAllAvatarsCellKey;
+
+static UITableViewCell *ApolloHideAllAvatarsSettingsCell(UIViewController *vc, UITableViewCell *donor) {
+    UITableViewCell *cell = objc_getAssociatedObject(vc, kApolloHideAllAvatarsCellKey);
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+        cell.textLabel.text = @"Hide All User Avatars";
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
+        toggle.accessibilityLabel = @"Hide User Profile Pictures Everywhere";
+        [toggle addTarget:[ApolloHideAuthorsToggleTarget sharedTarget]
+                   action:@selector(avatarVisibilityChanged:)
+         forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+        objc_setAssociatedObject(vc, kApolloHideAllAvatarsCellKey, cell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [(UISwitch *)cell.accessoryView setOn:sHideAllUserAvatars animated:NO];
     if (donor) {
         cell.backgroundColor = donor.backgroundColor;
         cell.textLabel.font = donor.textLabel.font;
@@ -173,6 +217,11 @@ static const void *kApolloInjSavedCategoriesKey = &kApolloInjSavedCategoriesKey;
     ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
         ^UITableViewCell *(UIViewController *vc, UITableViewCell *donor) {
             return ApolloHideAuthorsSettingsCell(vc, donor);
+        });
+
+    ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
+        ^UITableViewCell *(UIViewController *vc, UITableViewCell *donor) {
+            return ApolloHideAllAvatarsSettingsCell(vc, donor);
         });
 
     // Native rows relocated onto Reborn screens (see the header comment). The
