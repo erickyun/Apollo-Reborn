@@ -120,6 +120,7 @@ float ApolloSanitizedHoldSpeed(float value);
 extern BOOL sProxyImgurDDG;
 extern BOOL sImgurAlbumFallbackProxies;
 extern BOOL sShowUserAvatars;
+extern BOOL sHideAllUserAvatars; // master visual privacy switch; overrides inline + profile avatars
 extern BOOL sUseProfileAvatarTabIcon;
 // Hide the visible main-tab labels while retaining/restoring the underlying
 // UITabBarItem titles. Opt-in; default OFF via registerDefaults.
