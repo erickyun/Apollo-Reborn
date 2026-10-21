@@ -46,6 +46,7 @@ float sVideoHoldSpeed = 2.0f;        // effective default 2.0× via registerDefa
 BOOL sProxyImgurDDG = NO;
 BOOL sImgurAlbumFallbackProxies = YES;
 BOOL sShowUserAvatars = NO;
+BOOL sHideAllUserAvatars = NO;
 BOOL sUseProfileAvatarTabIcon = NO;
 BOOL sHideTabBarTitles = NO;
 BOOL sShowDetailedProfiles = YES;   // effective default ON via registerDefaults (UDKeyShowDetailedProfiles)
