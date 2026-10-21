@@ -294,7 +294,15 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
 %hook ASTextNode
 - (void)setAttributedText:(NSAttributedString *)text {
     if (ApolloIsMarkedHiddenAuthor(self)) {
-        %orig(ApolloEmptyAuthorText());
+        // A title node may not have text at its first measure. If a later
+        // async bind inserts a composite author+community label, do not wipe
+        // out the visible "in piracy" / "r/piracy" portion.
+        if (ApolloAuthorTitleIncludesCommunity(text.string)) {
+            NSAttributedString *redacted = ApolloRedactPostMetadataUsername(text);
+            %orig(redacted ?: text);
+        } else {
+            %orig(ApolloEmptyAuthorText());
+        }
         return;
     }
     // Some post metadata nodes are composite: preserve r/subreddit or
@@ -322,7 +330,15 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
 %hook ASTextNode2
 - (void)setAttributedText:(NSAttributedString *)text {
     if (ApolloIsMarkedHiddenAuthor(self)) {
-        %orig(ApolloEmptyAuthorText());
+        // A title node may not have text at its first measure. If a later
+        // async bind inserts a composite author+community label, do not wipe
+        // out the visible "in piracy" / "r/piracy" portion.
+        if (ApolloAuthorTitleIncludesCommunity(text.string)) {
+            NSAttributedString *redacted = ApolloRedactPostMetadataUsername(text);
+            %orig(redacted ?: text);
+        } else {
+            %orig(ApolloEmptyAuthorText());
+        }
         return;
     }
     // Some post metadata nodes are composite: preserve r/subreddit or
