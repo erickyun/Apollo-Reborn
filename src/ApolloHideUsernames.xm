@@ -19,6 +19,88 @@ static BOOL ApolloHideUsernamesEnabled(void) {
     return [[NSUserDefaults standardUserDefaults] boolForKey:kApolloHideUsernamesKey];
 }
 
+// Metadata labels can mix community and author, e.g. "in piracy · u/name".
+// Redact only the username token; never delete "in piracy" or "r/piracy".
+// This marker is assigned ONLY to text nodes in a known postInfoNode subtree.
+static char kApolloPostMetadataTextNodeKey;
+
+static NSAttributedString *ApolloRedactPostMetadataUsername(NSAttributedString *text) {
+    if (![text isKindOfClass:[NSAttributedString class]]) return nil;
+    NSString *source = text.string;
+    if (source.length == 0 || source.length > 220 ||
+        [source rangeOfString:@"\n"].location != NSNotFound ||
+        [source rangeOfString:@"u/" options:NSCaseInsensitiveSearch].location == NSNotFound) return nil;
+
+    static NSRegularExpression *usernameRE;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        usernameRE = [NSRegularExpression
+            regularExpressionWithPattern:@"(?i)(?<![A-Za-z0-9_])u/[A-Za-z0-9_-]{2,20}(?![A-Za-z0-9_-])"
+                                 options:0 error:nil];
+    });
+    NSArray<NSTextCheckingResult *> *matches = [usernameRE
+        matchesInString:source options:0 range:NSMakeRange(0, source.length)];
+    if (!matches.count) return nil;
+    NSMutableAttributedString *redacted = [text mutableCopy];
+    // Keep separators/subreddit names unchanged. Only the author token goes.
+    for (NSTextCheckingResult *match in matches.reverseObjectEnumerator) {
+        [redacted deleteCharactersInRange:match.range];
+    }
+    return redacted;
+}
+
+static BOOL ApolloAuthorTitleIncludesCommunity(NSString *string) {
+    if (![string isKindOfClass:[NSString class]]) return NO;
+    // A mixed byline must not be blanked entirely; keep its subreddit label.
+    return [string rangeOfString:@" in " options:NSCaseInsensitiveSearch].location != NSNotFound ||
+           [string rangeOfString:@"r/" options:NSCaseInsensitiveSearch].location != NSNotFound;
+}
+
+static void ApolloMarkPostMetadataTextNode(id node) {
+    if (![node respondsToSelector:@selector(attributedText)] ||
+        ![node respondsToSelector:@selector(setAttributedText:)]) return;
+    NSAttributedString *current = ((id (*)(id, SEL))objc_msgSend)
+        (node, @selector(attributedText));
+    NSAttributedString *newText = ApolloRedactPostMetadataUsername(current);
+    if (!newText) return;
+    objc_setAssociatedObject(node, &kApolloPostMetadataTextNodeKey, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    ((void (*)(id, SEL, id))objc_msgSend)(node, @selector(setAttributedText:), newText);
+}
+
+// Traverse ONLY the post metadata subtree. This does not visit the main
+// post title, comment text, subreddit content, or general page text.
+static void ApolloMarkPostInfoSubtree(id node,
+                                      NSMutableSet<NSValue *> *visited,
+                                      NSUInteger depth) {
+    if (!node || depth > 8 || visited.count >= 100) return;
+    NSValue *key = [NSValue valueWithNonretainedObject:node];
+    if ([visited containsObject:key]) return;
+    [visited addObject:key];
+    ApolloMarkPostMetadataTextNode(node);
+
+    if ([node respondsToSelector:@selector(titleNode)]) {
+        id titleNode = ((id (*)(id, SEL))objc_msgSend)(node, @selector(titleNode));
+        if (titleNode && titleNode != node) {
+            ApolloMarkPostInfoSubtree(titleNode, visited, depth + 1);
+        }
+    }
+    if ([node respondsToSelector:@selector(subnodes)]) {
+        id children = ((id (*)(id, SEL))objc_msgSend)(node, @selector(subnodes));
+        if ([children isKindOfClass:[NSArray class]]) {
+            for (id child in children) {
+                ApolloMarkPostInfoSubtree(child, visited, depth + 1);
+            }
+        }
+    }
+}
+
+static void ApolloSuppressPostMetadataInCell(id cell) {
+    if (!ApolloHideUsernamesEnabled() || !cell) return;
+    id postInfo = ApolloObjectIvar(cell, "postInfoNode");
+    if (postInfo) ApolloMarkPostInfoSubtree(postInfo, [NSMutableSet set], 0);
+}
+
 // Author buttons are distinct from title and flair nodes. Never scan text for
 // strings matching usernames: a post title or comment body may mention one.
 static id ApolloAuthorButtonForCell(id cell, BOOL isComment) {
@@ -48,15 +130,19 @@ static void ApolloSuppressAuthorButton(id button) {
     id textNode = ((id (*)(id, SEL))objc_msgSend)(button, @selector(titleNode));
     if (!textNode || ![textNode respondsToSelector:@selector(setAttributedText:)]) return;
 
-    // Mark the exact author node. Apollo (and the inline-avatar feature) may
-    // replace the attributed title asynchronously after this cell is measured.
-    // The ASTextNode hooks below keep later replacements hidden too.
-    objc_setAssociatedObject(textNode, &kApolloHiddenAuthorTextNodeKey, @YES,
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
     NSAttributedString *current = [textNode respondsToSelector:@selector(attributedText)]
         ? ((id (*)(id, SEL))objc_msgSend)(textNode, @selector(attributedText))
         : nil;
+    // Some Apollo layouts combine "in piracy" and "u/author" in one title.
+    // Preserve the community substring instead of hiding the whole button.
+    if (ApolloAuthorTitleIncludesCommunity(current.string)) {
+        ApolloMarkPostMetadataTextNode(textNode);
+        return;
+    }
+    // Ordinary standalone author label: hide its entire title.
+    // Future async setAttributedText: updates remain hidden via the hook.
+    objc_setAssociatedObject(textNode, &kApolloHiddenAuthorTextNodeKey, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (current.length) {
         ((void (*)(id, SEL, id))objc_msgSend)(textNode, @selector(setAttributedText:),
                                               ApolloEmptyAuthorText());
@@ -184,6 +270,16 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
         %orig(ApolloEmptyAuthorText());
         return;
     }
+    // Some post metadata nodes are composite: preserve r/subreddit or
+    // "in subreddit", removing only the u/author span.
+    if (ApolloHideUsernamesEnabled() &&
+        [objc_getAssociatedObject(self, &kApolloPostMetadataTextNodeKey) boolValue]) {
+        NSAttributedString *redacted = ApolloRedactPostMetadataUsername(text);
+        if (redacted) {
+            %orig(redacted);
+            return;
+        }
+    }
     if (ApolloHideUsernamesEnabled() &&
         [objc_getAssociatedObject(self, &kApolloCrosspostCreditNodeKey) boolValue]) {
         NSAttributedString *redacted = ApolloRedactCrosspostCredit(text);
@@ -201,6 +297,16 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
     if (ApolloIsMarkedHiddenAuthor(self)) {
         %orig(ApolloEmptyAuthorText());
         return;
+    }
+    // Some post metadata nodes are composite: preserve r/subreddit or
+    // "in subreddit", removing only the u/author span.
+    if (ApolloHideUsernamesEnabled() &&
+        [objc_getAssociatedObject(self, &kApolloPostMetadataTextNodeKey) boolValue]) {
+        NSAttributedString *redacted = ApolloRedactPostMetadataUsername(text);
+        if (redacted) {
+            %orig(redacted);
+            return;
+        }
     }
     if (ApolloHideUsernamesEnabled() &&
         [objc_getAssociatedObject(self, &kApolloCrosspostCreditNodeKey) boolValue]) {
@@ -228,14 +334,17 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
 %hook _TtC6Apollo17LargePostCellNode
 - (id)layoutSpecThatFits:(struct ApolloTextureSizeRange)range {
     ApolloSuppressAuthorInCell(self, NO);
+    ApolloSuppressPostMetadataInCell(self);
     ApolloSuppressCrosspostInCell(self);
     id spec = %orig;
+    ApolloSuppressPostMetadataInCell(self);
     ApolloSuppressCrosspostInCell(self);
     return spec;
 }
 - (void)didLoad {
     %orig;
     ApolloSuppressAuthorInCell(self, NO);
+    ApolloSuppressPostMetadataInCell(self);
     ApolloSuppressCrosspostInCell(self);
 }
 %end
@@ -243,14 +352,17 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
 %hook _TtC6Apollo19CompactPostCellNode
 - (id)layoutSpecThatFits:(struct ApolloTextureSizeRange)range {
     ApolloSuppressAuthorInCell(self, NO);
+    ApolloSuppressPostMetadataInCell(self);
     ApolloSuppressCrosspostInCell(self);
     id spec = %orig;
+    ApolloSuppressPostMetadataInCell(self);
     ApolloSuppressCrosspostInCell(self);
     return spec;
 }
 - (void)didLoad {
     %orig;
     ApolloSuppressAuthorInCell(self, NO);
+    ApolloSuppressPostMetadataInCell(self);
     ApolloSuppressCrosspostInCell(self);
 }
 %end
@@ -258,14 +370,17 @@ static BOOL ApolloIsMarkedHiddenAuthor(id node) {
 %hook _TtC6Apollo22CommentsHeaderCellNode
 - (id)layoutSpecThatFits:(struct ApolloTextureSizeRange)range {
     ApolloSuppressAuthorInCell(self, NO);
+    ApolloSuppressPostMetadataInCell(self);
     ApolloSuppressCrosspostInCell(self);
     id spec = %orig;
+    ApolloSuppressPostMetadataInCell(self);
     ApolloSuppressCrosspostInCell(self);
     return spec;
 }
 - (void)didLoad {
     %orig;
     ApolloSuppressAuthorInCell(self, NO);
+    ApolloSuppressPostMetadataInCell(self);
     ApolloSuppressCrosspostInCell(self);
 }
 %end
