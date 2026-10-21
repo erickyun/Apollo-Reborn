@@ -720,6 +720,8 @@ static NSString *const UDKeyUpdateSkippedVersion = @"UpdateSkippedVersion"; // "
 
 // Feed thumbnails for text posts with embedded images (off = native behavior).
 static NSString *const UDKeyFeedTextPostThumbnails = @"FeedTextPostThumbnails";
+// Hide images/gallery previews in feed cards only; detail pages keep their media.
+static NSString *const UDKeyHideFeedPostImages = @"HideFeedPostImages";
 // Replaces Apollo's fixed two/three-tile Reddit-gallery mosaic in large feed
 // cards with a horizontally paging image carousel. Default YES. See
 // ApolloFeedGalleryCarousel.xm.
