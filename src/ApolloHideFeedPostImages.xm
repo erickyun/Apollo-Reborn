@@ -47,6 +47,20 @@ static void ApolloFeedMarkCellImages(id cell) {
     if (crosspost) ApolloFeedMarkRichMedia(ApolloObjectIvar(crosspost, "richMediaNode"));
 }
 
+// First layout may construct the rich media after the parent marking pass.
+// The ancestor check covers that path without affecting the comments header
+// or the separate Save as Image preview node tree.
+static BOOL ApolloFeedMediaBelongsToLargePostCell(id node) {
+    if ([objc_getAssociatedObject(node, &kApolloFeedOnlyRichMediaKey) boolValue]) return YES;
+    id parent = ((ASDisplayNode *)node).supernode;
+    for (NSUInteger depth = 0; parent && depth < 12; depth++) {
+        if (ApolloClassLargePostCellNode &&
+            [parent isKindOfClass:ApolloClassLargePostCellNode]) return YES;
+        parent = ((ASDisplayNode *)parent).supernode;
+    }
+    return NO;
+}
+
 // Compress the compact thumbnail node itself as well as its layout spec:
 // simply making an image transparent would leave the picture-size gutter.
 // Save Texture's sizing inputs, so toggling the preference off can restore
@@ -81,7 +95,9 @@ static void ApolloFeedSetCompactThumbSizing(id node, BOOL hidden) {
 - (id)layoutSpecThatFits:(struct ApolloTextureSizeRange)range {
     // Mark early: child RichMediaNode can measure off-main before didLoad.
     if (sHideFeedPostImages) ApolloFeedMarkCellImages(self);
-    return %orig;
+    id spec = %orig;
+    if (sHideFeedPostImages) ApolloFeedMarkCellImages(self);
+    return spec;
 }
 
 - (void)didLoad {
@@ -95,7 +111,7 @@ static void ApolloFeedSetCompactThumbSizing(id node, BOOL hidden) {
 
 - (id)layoutSpecThatFits:(struct ApolloTextureSizeRange)range {
     if (!sHideFeedPostImages ||
-        ![objc_getAssociatedObject(self, &kApolloFeedOnlyRichMediaKey) boolValue] ||
+        !ApolloFeedMediaBelongsToLargePostCell(self) ||
         ApolloReadBoolIvar(self, "isShownInCommentsHeader", NO)) {
         return %orig;
     }
