@@ -93,10 +93,13 @@ static void ApolloRegisterGeneralDisclosureRow(NSString *title,
 // The cell is cached per General screen, just like other injected rows.
 static const void *kApolloHideAuthorsCellKey = &kApolloHideAuthorsCellKey;
 static NSString *const kApolloHideAuthorsPrefKey = @"ApolloHidePostCommentUsernames";
+static const void *kApolloHidePostInfoUserCellKey = &kApolloHidePostInfoUserCellKey;
+static NSString *const kApolloHidePostInfoUserPrefKey = @"ApolloHideUsernamesInPostInfo";
 
 @interface ApolloHideAuthorsToggleTarget : NSObject
 + (instancetype)sharedTarget;
 - (void)visibilityChanged:(UISwitch *)sender;
+- (void)postInfoVisibilityChanged:(UISwitch *)sender;
 - (void)avatarVisibilityChanged:(UISwitch *)sender;
 @end
 
@@ -111,6 +114,14 @@ static NSString *const kApolloHideAuthorsPrefKey = @"ApolloHidePostCommentUserna
     [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kApolloHideAuthorsPrefKey];
     // Native post feeds refresh via this same appearance notification.
     // Open comment threads should be reopened to rebuild their text nodes.
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"com.christianselig.PostCellAppearanceUpdated" object:nil];
+}
+
+- (void)postInfoVisibilityChanged:(UISwitch *)sender {
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kApolloHidePostInfoUserPrefKey];
+    // Independent of "Hide Author Usernames". Feed cells can refresh here;
+    // already displayed comment threads should be reopened after changes.
     [[NSNotificationCenter defaultCenter]
         postNotificationName:@"com.christianselig.PostCellAppearanceUpdated" object:nil];
 }
@@ -145,6 +156,36 @@ static UITableViewCell *ApolloHideAuthorsSettingsCell(UIViewController *vc, UITa
     }
     [(UISwitch *)cell.accessoryView setOn:
         [NSUserDefaults.standardUserDefaults boolForKey:kApolloHideAuthorsPrefKey] animated:NO];
+    if (donor) {
+        cell.backgroundColor = donor.backgroundColor;
+        cell.textLabel.font = donor.textLabel.font;
+        cell.textLabel.textColor = donor.textLabel.textColor;
+    }
+    return cell;
+}
+
+// Second author-visibility preference. Unlike the original switch, only the
+// literal u/<username> token is removed from a composite post-info line,
+// leaving r/<subreddit>, "in piracy" and other metadata visible.
+static UITableViewCell *ApolloHidePostInfoUserSettingsCell(UIViewController *vc,
+                                                           UITableViewCell *donor) {
+    UITableViewCell *cell = objc_getAssociatedObject(vc, kApolloHidePostInfoUserCellKey);
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+        cell.textLabel.text = @"Hide u/ in Post Info";
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
+        toggle.accessibilityLabel = @"Hide u/ usernames in post information only";
+        [toggle addTarget:[ApolloHideAuthorsToggleTarget sharedTarget]
+                   action:@selector(postInfoVisibilityChanged:)
+         forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+        objc_setAssociatedObject(vc, kApolloHidePostInfoUserCellKey, cell,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [(UISwitch *)cell.accessoryView setOn:
+        [NSUserDefaults.standardUserDefaults boolForKey:kApolloHidePostInfoUserPrefKey]
+                                  animated:NO];
     if (donor) {
         cell.backgroundColor = donor.backgroundColor;
         cell.textLabel.font = donor.textLabel.font;
@@ -217,6 +258,12 @@ static const void *kApolloInjSavedCategoriesKey = &kApolloInjSavedCategoriesKey;
     ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
         ^UITableViewCell *(UIViewController *vc, UITableViewCell *donor) {
             return ApolloHideAuthorsSettingsCell(vc, donor);
+        });
+
+    // Keep the old full-hide toggle and add a separate selective metadata one.
+    ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
+        ^UITableViewCell *(UIViewController *vc, UITableViewCell *donor) {
+            return ApolloHidePostInfoUserSettingsCell(vc, donor);
         });
 
     ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
