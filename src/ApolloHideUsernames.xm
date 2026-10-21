@@ -85,9 +85,17 @@ static NSAttributedString *ApolloRedactPostMetadataUsername(NSAttributedString *
 
 static BOOL ApolloAuthorTitleIncludesCommunity(NSString *string) {
     if (![string isKindOfClass:[NSString class]]) return NO;
-    // A mixed byline must not be blanked entirely; keep its subreddit label.
-    return [string rangeOfString:@" in " options:NSCaseInsensitiveSearch].location != NSNotFound ||
-           [string rangeOfString:@"r/" options:NSCaseInsensitiveSearch].location != NSNotFound;
+    // Combined bylines can start with "in piracy", not just contain " in ".
+    // Preserve any extra community/time metadata when both toggles are on.
+    NSString *trimmed = [string stringByTrimmingCharactersInSet:
+        [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *lower = trimmed.lowercaseString;
+    return [lower hasPrefix:@"in "] ||
+           [lower containsString:@" in "] ||
+           [lower containsString:@"r/"] ||
+           [lower containsString:@" · "] ||
+           [lower containsString:@" • "] ||
+           [lower containsString:@" | "];
 }
 
 static void ApolloMarkPostMetadataTextNode(id node) {
