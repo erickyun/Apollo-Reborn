@@ -3728,6 +3728,7 @@ static void ApolloShowRedditRateLimitToast(NSTimeInterval seconds) {
                                     UDKeyShareLinkHost: @(ShareLinkHostDefault),
                                     UDKeyShowUserAvatars: @NO,
                                     UDKeyHideAllUserAvatars: @NO,
+                                    UDKeyHideFeedPostImages: @NO,
                                     UDKeyUseProfileAvatarTabIcon: @NO,
                                     UDKeyHideTabBarTitles: @NO,
                                     UDKeyShowDetailedProfiles: @YES,
@@ -4014,6 +4015,7 @@ static void ApolloShowRedditRateLimitToast(NSTimeInterval seconds) {
     if (sShareLinkHost < ShareLinkHostDefault || sShareLinkHost > ShareLinkHostFXReddit) sShareLinkHost = ShareLinkHostDefault;
     sShowUserAvatars = [[NSUserDefaults standardUserDefaults] boolForKey:UDKeyShowUserAvatars];
     sHideAllUserAvatars = [standardDefaults boolForKey:UDKeyHideAllUserAvatars];
+    sHideFeedPostImages = [standardDefaults boolForKey:UDKeyHideFeedPostImages];
     sUseProfileAvatarTabIcon = [[NSUserDefaults standardUserDefaults] boolForKey:UDKeyUseProfileAvatarTabIcon];
     sHideTabBarTitles = [[NSUserDefaults standardUserDefaults] boolForKey:UDKeyHideTabBarTitles];
     ApolloNormalizeNativeHideUsernameForIconOnlyTabBar();
