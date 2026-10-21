@@ -161,6 +161,7 @@ ApolloReborn_FILES = \
     $(SRC_DIR)/ApolloMediaAutoplay.m \
     $(SRC_DIR)/ApolloCommentsCollapse.xm \
     $(SRC_DIR)/ApolloCommentHeaderLayout.xm \
+    $(SRC_DIR)/ApolloHideUsernames.xm \
     $(SRC_DIR)/ApolloMaintainerTint.m \
     $(SRC_DIR)/ApolloInboxCommentScroll.xm \
     $(SRC_DIR)/ApolloFindInComments.xm \
