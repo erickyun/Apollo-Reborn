@@ -42,9 +42,36 @@ static NSAttributedString *ApolloRedactPostMetadataUsername(NSAttributedString *
         matchesInString:source options:0 range:NSMakeRange(0, source.length)];
     if (!matches.count) return nil;
     NSMutableAttributedString *redacted = [text mutableCopy];
-    // Keep separators/subreddit names unchanged. Only the author token goes.
+    // Remove any separator that belongs only to the user label. Preserve
+    // subreddit names and delimiters between OTHER metadata fields.
+    NSCharacterSet *whitespace = [NSCharacterSet whitespaceCharacterSet];
     for (NSTextCheckingResult *match in matches.reverseObjectEnumerator) {
-        [redacted deleteCharactersInRange:match.range];
+        NSUInteger start = match.range.location;
+        NSUInteger end = NSMaxRange(match.range);
+        NSUInteger left = start;
+        while (left > 0 && [whitespace characterIsMember:[source characterAtIndex:left - 1]]) left--;
+        if (left > 0 && (
+            [source characterAtIndex:left - 1] == 0x00B7 || // ·
+            [source characterAtIndex:left - 1] == 0x2022 || // •
+            [source characterAtIndex:left - 1] == '|')) {
+            start = left - 1;
+            while (start > 0 &&
+                   [whitespace characterIsMember:[source characterAtIndex:start - 1]]) start--;
+        } else if (left == 0) {
+            // First metadata field was the author: remove its following
+            // delimiter, not the visible 'in piracy' field that comes next.
+            while (end < source.length && [whitespace characterIsMember:[source characterAtIndex:end]]) end++;
+            if (end < source.length && (
+                [source characterAtIndex:end] == 0x00B7 ||
+                [source characterAtIndex:end] == 0x2022 ||
+                [source characterAtIndex:end] == '|')) {
+                end++;
+                while (end < source.length && [whitespace characterIsMember:[source characterAtIndex:end]]) end++;
+            }
+        } else {
+            start = left; // Trim the single space before a standalone u/name.
+        }
+        [redacted deleteCharactersInRange:NSMakeRange(start, end - start)];
     }
     return redacted;
 }
