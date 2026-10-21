@@ -87,6 +87,56 @@ static void ApolloRegisterGeneralDisclosureRow(NSString *title,
         });
 }
 
+// Post/comment author-visibility preference (display-only, defaults off).
+// The cell is cached per General screen, just like other injected rows.
+static const void *kApolloHideAuthorsCellKey = &kApolloHideAuthorsCellKey;
+static NSString *const kApolloHideAuthorsPrefKey = @"ApolloHidePostCommentUsernames";
+
+@interface ApolloHideAuthorsToggleTarget : NSObject
++ (instancetype)sharedTarget;
+- (void)visibilityChanged:(UISwitch *)sender;
+@end
+
+@implementation ApolloHideAuthorsToggleTarget
++ (instancetype)sharedTarget {
+    static ApolloHideAuthorsToggleTarget *target;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ target = [self new]; });
+    return target;
+}
+- (void)visibilityChanged:(UISwitch *)sender {
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kApolloHideAuthorsPrefKey];
+    // Native post feeds refresh via this same appearance notification.
+    // Open comment threads should be reopened to rebuild their text nodes.
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"com.christianselig.PostCellAppearanceUpdated" object:nil];
+}
+@end
+
+static UITableViewCell *ApolloHideAuthorsSettingsCell(UIViewController *vc, UITableViewCell *donor) {
+    UITableViewCell *cell = objc_getAssociatedObject(vc, kApolloHideAuthorsCellKey);
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+        cell.textLabel.text = @"Hide Author Usernames";
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
+        toggle.accessibilityLabel = @"Hide Author Usernames in Posts and Comments";
+        [toggle addTarget:[ApolloHideAuthorsToggleTarget sharedTarget]
+                   action:@selector(visibilityChanged:)
+         forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+        objc_setAssociatedObject(vc, kApolloHideAuthorsCellKey, cell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [(UISwitch *)cell.accessoryView setOn:
+        [NSUserDefaults.standardUserDefaults boolForKey:kApolloHideAuthorsPrefKey] animated:NO];
+    if (donor) {
+        cell.backgroundColor = donor.backgroundColor;
+        cell.textLabel.font = donor.textLabel.font;
+        cell.textLabel.textColor = donor.textLabel.textColor;
+    }
+    return cell;
+}
+
 static const void *kApolloInjOpenInAppKey = &kApolloInjOpenInAppKey;
 static const void *kApolloInjFeedUnmuteKey = &kApolloInjFeedUnmuteKey;
 static const void *kApolloInjPiPKey = &kApolloInjPiPKey;
@@ -117,6 +167,13 @@ static const void *kApolloInjSavedCategoriesKey = &kApolloInjSavedCategoriesKey;
                                        @"Allow Save Categories",
                                        kApolloInjSavedCategoriesKey,
                                        @"saved-categories");
+
+    // One opt-in switch affects feed posts, post headers and comment authors.
+    // "Allow Save Categories" is a stable native General > Other anchor.
+    ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
+        ^UITableViewCell *(UIViewController *vc, UITableViewCell *donor) {
+            return ApolloHideAuthorsSettingsCell(vc, donor);
+        });
 
     // Native rows relocated onto Reborn screens (see the header comment). The
     // mirrors read/write the same native keys, so hiding these is pure
