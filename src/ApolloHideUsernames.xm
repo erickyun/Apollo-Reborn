@@ -270,7 +270,10 @@ static void ApolloHideCrosspostAuthorSubtree(id node,
     }
     ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorNode"), NO, author);
     ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorButtonNode"), NO, author);
-    if (info) ApolloSuppressAuthorButton(ApolloObjectIvar(info, "authorButtonNode"), NO, author);
+    if (info) {
+        ApolloSuppressAuthorButton(ApolloObjectIvar(info, "authorButtonNode"), NO, author);
+        ApolloMarkPostInfoContent(info, nil);
+    }
 
     const char *additionalNodes[] = {
         "originalPostInfoNode", "crosspostInfoNode", "authorInfoNode",
