@@ -29,15 +29,6 @@ static BOOL ApolloHidePostAuthorEnabled(void) {
     return [[NSUserDefaults standardUserDefaults] boolForKey:kApolloHidePostAuthorKey];
 }
 
-static NSAttributedString *ApolloEmptyAuthorText(void) {
-    static NSAttributedString *emptyText;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        emptyText = [[NSAttributedString alloc] initWithString:@""];
-    });
-    return emptyText;
-}
-
 // Use the post's author property as an exact identity source, not a global
 // substring/regex search for u/. Restrict edits to that author's text node.
 // Crucially, the button title can also contain vote count, comment count,
@@ -65,18 +56,25 @@ static NSAttributedString *ApolloPostTitleWithoutAuthor(NSAttributedString *inpu
     if (original.length == 0 || original.length > 300) return nil;
 
     // Match this post's actual author, with optional u/ and "by " prefixes.
-    // The token boundary prevents hiding the name inside an unrelated word.
+    // The token boundary and r/ / "in " exclusion protect subreddit labels
+    // when a community name happens to match the author.
     NSRange hit = [original rangeOfString:author options:NSCaseInsensitiveSearch];
     while (hit.location != NSNotFound) {
         NSUInteger start = hit.location;
         NSUInteger end = NSMaxRange(hit);
         BOOL leftOK = (start == 0) || ApolloAuthorBoundaryCharacter([original characterAtIndex:start-1]);
         BOOL rightOK = (end == original.length) || ApolloAuthorBoundaryCharacter([original characterAtIndex:end]);
-        if (leftOK && rightOK) {
-            if (start >= 2 && [original characterAtIndex:start-1] == '/' &&
-                ([original characterAtIndex:start-2] == 'u' || [original characterAtIndex:start-2] == 'U')) {
-                start -= 2;
-            }
+        NSString *twoBefore = start >= 2
+            ? [[original substringWithRange:NSMakeRange(start-2, 2)] lowercaseString] : @"";
+        NSString *threeBefore = start >= 3
+            ? [[original substringWithRange:NSMakeRange(start-3, 3)] lowercaseString] : @"";
+        BOOL userPrefix = [twoBefore isEqualToString:@"u/"];
+        BOOL subredditPrefix = [twoBefore isEqualToString:@"r/"] ||
+                               [threeBefore isEqualToString:@"in "];
+        // Names can coincide with subreddit names (e.g. r/piracy and
+        // u/piracy). Never redact the subreddit label by mistake.
+        if (leftOK && rightOK && !subredditPrefix) {
+            if (userPrefix) start -= 2;
             // Remove a preceding "by " only when attached to the author.
             if (start >= 3) {
                 NSString *prefix = [original substringWithRange:NSMakeRange(start-3, 3)];
