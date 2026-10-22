@@ -1078,7 +1078,7 @@ static void ApolloFeedGallerySettingChanged(void) {
     // three-image mosaic spec would be built on every measurement pass while
     // scrolling and then thrown away.
     ASDisplayNode *existingHost = objc_getAssociatedObject(self, &kApolloFeedGalleryHostNodeKey);
-    if (!sFeedGalleryCarousel || !sApolloFeedGalleryPINAvailable) {
+    if (sHideFeedPostImages || !sFeedGalleryCarousel || !sApolloFeedGalleryPINAvailable) {
         if (existingHost) ApolloFeedGalleryScheduleApply(existingHost, self, nil, NO, NO, NO);
         return %orig;
     }

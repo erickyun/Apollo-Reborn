@@ -13,7 +13,7 @@
 // textLabel, fetch the avatar, and paint a pre-circled image into imageView.
 // UITableViewCell handles the leading-image layout (indents the text) for free.
 //
-// Gated behind the existing `sShowUserAvatars` toggle — conceptually this is
+// Gated behind the existing `ApolloInlineUserAvatarsEnabled()` toggle — conceptually this is
 // "the avatars you already have, shown for moderators too", so it follows the
 // same setting rather than adding a new one.
 //
@@ -26,6 +26,7 @@
 #import <objc/message.h>
 #import "ApolloCommon.h"
 #import "ApolloState.h"
+#import "ApolloAvatarVisibility.h"
 #import "ApolloUserProfileCache.h"
 #import "ApolloClasses.h"
 
@@ -114,7 +115,7 @@ static void ApolloModAvatarApplyToCell(UITableViewCell *cell, UITraitCollection 
 
 - (id)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = %orig;
-    if (!sShowUserAvatars) return cell;
+    if (!ApolloInlineUserAvatarsEnabled()) return cell;
     Class subtitleCellClass = ApolloClassApolloSubtitleTableViewCell;
     if (!subtitleCellClass || ![cell isMemberOfClass:subtitleCellClass]) return cell;
     ApolloModAvatarApplyToCell(cell, tableView.traitCollection);

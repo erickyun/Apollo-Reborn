@@ -150,6 +150,9 @@ static NSString *const UDKeyEnableFlairColors = @"EnableFlairColors";
 // posts, crossposts, comment post context). Appearance > Posts > Bold Post
 // Titles; default NO. See ApolloBoldPostTitles.xm.
 static NSString *const UDKeyBoldPostTitles = @"BoldPostTitles";
+// Overrides all user avatar renderers (inline, profile, tab icon, modern chat).
+// Opt-in, default OFF. Does not affect subreddit icons or post media.
+static NSString *const UDKeyHideAllUserAvatars = @"ApolloHideAllUserAvatars";
 static NSString *const ApolloFlairColorsChangedNotification = @"ApolloFlairColorsChangedNotification";
 static NSString *const UDKeyReadPostMaxCount = @"ReadPostMaxCount";
 static NSString *const UDKeyPreferredGIFFallbackFormat = @"PreferredGIFFallbackFormat";
@@ -717,6 +720,8 @@ static NSString *const UDKeyUpdateSkippedVersion = @"UpdateSkippedVersion"; // "
 
 // Feed thumbnails for text posts with embedded images (off = native behavior).
 static NSString *const UDKeyFeedTextPostThumbnails = @"FeedTextPostThumbnails";
+// Hide images/gallery previews in feed cards only; detail pages keep their media.
+static NSString *const UDKeyHideFeedPostImages = @"HideFeedPostImages";
 // Replaces Apollo's fixed two/three-tile Reddit-gallery mosaic in large feed
 // cards with a horizontally paging image carousel. Default YES. See
 // ApolloFeedGalleryCarousel.xm.
