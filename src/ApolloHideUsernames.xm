@@ -20,6 +20,7 @@ static NSString *const kApolloHideUsernamesKey = @"ApolloHidePostCommentUsername
 static NSString *const kApolloHidePostAuthorKey = @"ApolloHideUsernamesInPostInfo";
 static char kApolloHiddenCommentAuthorNodeKey;
 static char kApolloPostAuthorUsernameKey;
+static char kApolloPostInfoModelAuthorKey;
 
 static BOOL ApolloHideUsernamesEnabled(void) {
     return [[NSUserDefaults standardUserDefaults] boolForKey:kApolloHideUsernamesKey];
@@ -111,6 +112,94 @@ static NSAttributedString *ApolloPostTitleWithoutAuthor(NSAttributedString *inpu
     return nil;
 }
 
+// The app does not consistently place its byline in authorButtonNode.titleNode.
+// Some layouts construct an ASTextNode inside PostInfoNode's returned layout
+// spec instead of attaching it to authorButtonNode/subnodes at measurement time.
+// Mark every *text node* belonging to that known metadata subtree and preserve
+// every other word when removing the model's author (votes, age, subreddit).
+static BOOL ApolloIsTextureTextNode(id object) {
+    if (!object) return NO;
+    Class text1 = objc_getClass("ASTextNode");
+    Class text2 = objc_getClass("ASTextNode2");
+    return (text1 && [object isKindOfClass:text1]) ||
+           (text2 && [object isKindOfClass:text2]);
+}
+
+static void ApolloMarkPostInfoTextTree(id root, NSString *author,
+                                       NSMutableSet<NSValue *> *seen,
+                                       NSUInteger depth) {
+    if (!root || !author.length || depth > 14 || seen.count >= 220) return;
+    NSValue *key = [NSValue valueWithNonretainedObject:root];
+    if ([seen containsObject:key]) return;
+    [seen addObject:key];
+
+    if (ApolloIsTextureTextNode(root) &&
+        [root respondsToSelector:@selector(setAttributedText:)]) {
+        objc_setAssociatedObject(root, &kApolloPostAuthorUsernameKey, author,
+                                 OBJC_ASSOCIATION_COPY_NONATOMIC);
+        if ([root respondsToSelector:@selector(attributedText)]) {
+            NSAttributedString *value = ((id (*)(id, SEL))objc_msgSend)
+                (root, @selector(attributedText));
+            NSAttributedString *result = ApolloPostTitleWithoutAuthor(value, author);
+            if (result) {
+                ((void (*)(id, SEL, id))objc_msgSend)(root, @selector(setAttributedText:), result);
+            }
+        }
+    }
+
+    // Text nodes are reached either via live Texture subnodes or by walking
+    // layout-spec children. In particular, nodes not yet loaded may not show
+    // in -subnodes but still occur under ASInsetLayoutSpec.child, etc.
+    const SEL arraySelectors[] = { @selector(subnodes), @selector(children) };
+    for (NSUInteger i = 0; i < sizeof(arraySelectors)/sizeof(arraySelectors[0]); i++) {
+        SEL sel = arraySelectors[i];
+        if (![root respondsToSelector:sel]) continue;
+        id children = ((id (*)(id, SEL))objc_msgSend)(root, sel);
+        if (![children isKindOfClass:[NSArray class]]) continue;
+        for (id child in (NSArray *)children) {
+            ApolloMarkPostInfoTextTree(child, author, seen, depth + 1);
+        }
+    }
+    const SEL oneSelectors[] = { @selector(child), @selector(background) };
+    for (NSUInteger i = 0; i < sizeof(oneSelectors)/sizeof(oneSelectors[0]); i++) {
+        SEL sel = oneSelectors[i];
+        if ([root respondsToSelector:sel]) {
+            id child = ((id (*)(id, SEL))objc_msgSend)(root, sel);
+            if (child && child != root) ApolloMarkPostInfoTextTree(child, author, seen, depth + 1);
+        }
+    }
+}
+
+static NSString *ApolloAuthorForPostInfoNode(id info) {
+    NSString *author = ApolloAuthorFromModel(ApolloObjectIvar(info, "link"));
+    if (!author.length) author = objc_getAssociatedObject(info, &kApolloPostInfoModelAuthorKey);
+    return author;
+}
+
+static void ApolloMarkPostInfoContent(id info, id nativeLayout) {
+    if ((!ApolloHideUsernamesEnabled() && !ApolloHidePostAuthorEnabled()) || !info) return;
+    NSString *author = ApolloAuthorForPostInfoNode(info);
+    if (!author.length) return;
+    NSMutableSet<NSValue *> *visited = [NSMutableSet set];
+    ApolloMarkPostInfoTextTree(info, author, visited, 0);
+    if (nativeLayout) ApolloMarkPostInfoTextTree(nativeLayout, author, visited, 0);
+}
+
+// Catch later async text assignments, even if the node had not been added to
+// the live subnode tree at the preceding PostInfoNode layout pass. No global
+// username text search: resolve model metadata only from an ancestor PostInfoNode.
+static NSString *ApolloAuthorForPostInfoAncestor(id textNode) {
+    Class infoClass = objc_getClass("_TtC6Apollo12PostInfoNode");
+    if (!infoClass) return nil;
+    id parent = textNode;
+    for (NSUInteger depth = 0; depth < 12 && parent; depth++) {
+        if ([parent isKindOfClass:infoClass]) return ApolloAuthorForPostInfoNode(parent);
+        if (![parent respondsToSelector:@selector(supernode)]) break;
+        parent = ((id (*)(id, SEL))objc_msgSend)(parent, @selector(supernode));
+    }
+    return nil;
+}
+
 static void ApolloSuppressAuthorButton(id button, BOOL isComment, NSString *modelAuthor) {
     BOOL enabled = isComment ? ApolloHideUsernamesEnabled() :
         (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled());
@@ -148,8 +237,14 @@ static void ApolloSuppressAuthorInCell(id cell, BOOL isComment) {
     if (!ApolloHideUsernamesEnabled() && !ApolloHidePostAuthorEnabled()) return;
     id postInfo = ApolloObjectIvar(cell, "postInfoNode");
     id model = ApolloObjectIvar(postInfo, "link") ?: ApolloObjectIvar(cell, "link");
+    NSString *author = ApolloAuthorFromModel(model);
+    if (postInfo && author.length) {
+        objc_setAssociatedObject(postInfo, &kApolloPostInfoModelAuthorKey, author,
+                                 OBJC_ASSOCIATION_COPY_NONATOMIC);
+        ApolloMarkPostInfoContent(postInfo, nil);
+    }
     ApolloSuppressAuthorButton(ApolloObjectIvar(postInfo, "authorButtonNode"),
-                               NO, ApolloAuthorFromModel(model));
+                               NO, author);
 }
 
 // Crossposts can have a second author button nested inside crosspostNode.
@@ -167,6 +262,11 @@ static void ApolloHideCrosspostAuthorSubtree(id node,
                ApolloObjectIvar(node, "crosspostParent") ?:
                ApolloObjectIvar(node, "link");
     NSString *author = ApolloAuthorFromModel(model);
+    if (info && author.length) {
+        objc_setAssociatedObject(info, &kApolloPostInfoModelAuthorKey, author,
+                                 OBJC_ASSOCIATION_COPY_NONATOMIC);
+        ApolloMarkPostInfoContent(info, nil);
+    }
     ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorNode"), NO, author);
     ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorButtonNode"), NO, author);
     if (info) ApolloSuppressAuthorButton(ApolloObjectIvar(info, "authorButtonNode"), NO, author);
@@ -204,22 +304,23 @@ static void ApolloSuppressCrosspostAuthorInCell(id cell) {
 %hook _TtC6Apollo12PostInfoNode
 
 - (id)layoutSpecThatFits:(struct ApolloTextureSizeRange)range {
+    id info = (id)self;
     if (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) {
-        ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"),
-                                   NO, ApolloAuthorFromModel(ApolloObjectIvar((id)self, "link")));
+        ApolloSuppressAuthorButton(ApolloObjectIvar(info, "authorButtonNode"),
+                                   NO, ApolloAuthorForPostInfoNode(info));
+        ApolloMarkPostInfoContent(info, nil);
     }
     id spec = %orig;
-    if (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) {
-        ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"),
-                                   NO, ApolloAuthorFromModel(ApolloObjectIvar((id)self, "link")));
-    }
+    ApolloMarkPostInfoContent(info, spec);
     return spec;
 }
 
 - (void)didLoad {
     %orig;
-    ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"),
-                               NO, ApolloAuthorFromModel(ApolloObjectIvar((id)self, "link")));
+    id info = (id)self;
+    ApolloMarkPostInfoContent(info, nil);
+    ApolloSuppressAuthorButton(ApolloObjectIvar(info, "authorButtonNode"),
+                               NO, ApolloAuthorForPostInfoNode(info));
 }
 
 %end
@@ -232,6 +333,7 @@ static void ApolloSuppressCrosspostAuthorInCell(id cell) {
     }
     if (!author && (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled())) {
         author = objc_getAssociatedObject(self, &kApolloPostAuthorUsernameKey);
+        if (!author.length) author = ApolloAuthorForPostInfoAncestor(self);
     }
     NSAttributedString *redacted = ApolloPostTitleWithoutAuthor(text, author);
     if (redacted) {
@@ -252,6 +354,7 @@ static void ApolloSuppressCrosspostAuthorInCell(id cell) {
     }
     if (!author && (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled())) {
         author = objc_getAssociatedObject(self, &kApolloPostAuthorUsernameKey);
+        if (!author.length) author = ApolloAuthorForPostInfoAncestor(self);
     }
     NSAttributedString *redacted = ApolloPostTitleWithoutAuthor(text, author);
     if (redacted) {
