@@ -19,7 +19,7 @@ static NSString *const kApolloHideUsernamesKey = @"ApolloHidePostCommentUsername
 // despite renaming the option from "Hide Post Info" to "Hide Post Author".
 static NSString *const kApolloHidePostAuthorKey = @"ApolloHideUsernamesInPostInfo";
 static char kApolloHiddenCommentAuthorNodeKey;
-static char kApolloHiddenPostAuthorNodeKey;
+static char kApolloPostAuthorUsernameKey;
 
 static BOOL ApolloHideUsernamesEnabled(void) {
     return [[NSUserDefaults standardUserDefaults] boolForKey:kApolloHideUsernamesKey];
@@ -38,11 +38,81 @@ static NSAttributedString *ApolloEmptyAuthorText(void) {
     return emptyText;
 }
 
-// No username matching or regex: this is the known author button, not an
-// arbitrary text node. The first hook marks it before Texture lays it out.
-// The ASTextNode hooks prevent a later attributed-title update from flashing
-// the author's name even when network metadata arrives asynchronously.
-static void ApolloSuppressAuthorButton(id button, BOOL isComment) {
+// Use the post's author property as an exact identity source, not a global
+// substring/regex search for u/. Restrict edits to that author's text node.
+// Crucially, the button title can also contain vote count, comment count,
+// subreddit, and age; don't blank the whole title or those values disappear.
+static NSString *ApolloAuthorFromModel(id model) {
+    if (!model || ![model respondsToSelector:@selector(author)]) return nil;
+    id result = ((id (*)(id, SEL))objc_msgSend)(model, @selector(author));
+    if (![result isKindOfClass:[NSString class]]) return nil;
+    NSString *name = (NSString *)result;
+    if ([name hasPrefix:@"u/"] || [name hasPrefix:@"U/"]) name = [name substringFromIndex:2];
+    if (name.length == 0 || [name isEqualToString:@"[deleted]"]) return nil;
+    return name;
+}
+
+static BOOL ApolloAuthorBoundaryCharacter(unichar c) {
+    return !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+             (c >= '0' && c <= '9') || c == '_');
+}
+
+static NSAttributedString *ApolloPostTitleWithoutAuthor(NSAttributedString *input,
+                                                         NSString *author) {
+    if (![input isKindOfClass:[NSAttributedString class]] || !author.length) return nil;
+    NSString *original = input.string;
+    if (original.length == 0 || original.length > 300) return nil;
+
+    // Match this post's actual author, with optional u/ and "by " prefixes.
+    // The token boundary prevents hiding the name inside an unrelated word.
+    NSRange hit = [original rangeOfString:author options:NSCaseInsensitiveSearch];
+    while (hit.location != NSNotFound) {
+        NSUInteger start = hit.location;
+        NSUInteger end = NSMaxRange(hit);
+        BOOL leftOK = (start == 0) || ApolloAuthorBoundaryCharacter([original characterAtIndex:start-1]);
+        BOOL rightOK = (end == original.length) || ApolloAuthorBoundaryCharacter([original characterAtIndex:end]);
+        if (leftOK && rightOK) {
+            if (start >= 2 && [original characterAtIndex:start-1] == '/' &&
+                ([original characterAtIndex:start-2] == 'u' || [original characterAtIndex:start-2] == 'U')) {
+                start -= 2;
+            }
+            // Remove a preceding "by " only when attached to the author.
+            if (start >= 3) {
+                NSString *prefix = [original substringWithRange:NSMakeRange(start-3, 3)];
+                if ([prefix caseInsensitiveCompare:@"by "] == NSOrderedSame) start -= 3;
+            }
+            NSCharacterSet *spaces = [NSCharacterSet whitespaceCharacterSet];
+            NSUInteger left = start;
+            while (left > 0 && [spaces characterIsMember:[original characterAtIndex:left-1]]) left--;
+            if (left > 0 && ([original characterAtIndex:left-1] == 0x00B7 ||
+                             [original characterAtIndex:left-1] == 0x2022 ||
+                             [original characterAtIndex:left-1] == '|')) {
+                start = left - 1;
+                while (start > 0 && [spaces characterIsMember:[original characterAtIndex:start-1]]) start--;
+            } else if (left == 0) {
+                while (end < original.length && [spaces characterIsMember:[original characterAtIndex:end]]) end++;
+                if (end < original.length && ([original characterAtIndex:end] == 0x00B7 ||
+                                              [original characterAtIndex:end] == 0x2022 ||
+                                              [original characterAtIndex:end] == '|')) {
+                    end++;
+                    while (end < original.length && [spaces characterIsMember:[original characterAtIndex:end]]) end++;
+                }
+            } else {
+                start = left;
+            }
+            NSMutableAttributedString *edited = [input mutableCopy];
+            [edited deleteCharactersInRange:NSMakeRange(start, end-start)];
+            return edited;
+        }
+        NSUInteger next = NSMaxRange(hit);
+        if (next >= original.length) break;
+        NSRange rest = NSMakeRange(next, original.length-next);
+        hit = [original rangeOfString:author options:NSCaseInsensitiveSearch range:rest];
+    }
+    return nil;
+}
+
+static void ApolloSuppressAuthorButton(id button, BOOL isComment, NSString *modelAuthor) {
     BOOL enabled = isComment ? ApolloHideUsernamesEnabled() :
         (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled());
     if (!enabled || !button || ![button respondsToSelector:@selector(titleNode)]) return;
@@ -50,26 +120,39 @@ static void ApolloSuppressAuthorButton(id button, BOOL isComment) {
     id textNode = ((id (*)(id, SEL))objc_msgSend)(button, @selector(titleNode));
     if (!textNode || ![textNode respondsToSelector:@selector(setAttributedText:)]) return;
 
-    // Different markers make the independent switches truly independent;
-    // enabling "Hide Post Author" never affects comment author labels.
-    const void *marker = isComment
-        ? (const void *)&kApolloHiddenCommentAuthorNodeKey
-        : (const void *)&kApolloHiddenPostAuthorNodeKey;
-    objc_setAssociatedObject(textNode, marker, @YES,
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    ((void (*)(id, SEL, id))objc_msgSend)(textNode, @selector(setAttributedText:),
-                                          ApolloEmptyAuthorText());
+    if (isComment) {
+        objc_setAssociatedObject(textNode, &kApolloHiddenCommentAuthorNodeKey, @YES,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        ((void (*)(id, SEL, id))objc_msgSend)(textNode, @selector(setAttributedText:),
+                                              ApolloEmptyAuthorText());
+        return;
+    }
+
+    // Fail open when the author model is unavailable: NEVER erase vote/comment
+    // totals or timestamps merely because a title node was identified.
+    if (!modelAuthor.length) return;
+    objc_setAssociatedObject(textNode, &kApolloPostAuthorUsernameKey, modelAuthor,
+                             OBJC_ASSOCIATION_COPY_NONATOMIC);
+    if ([textNode respondsToSelector:@selector(attributedText)]) {
+        NSAttributedString *current = ((id (*)(id, SEL))objc_msgSend)
+            (textNode, @selector(attributedText));
+        NSAttributedString *redacted = ApolloPostTitleWithoutAuthor(current, modelAuthor);
+        if (redacted) ((void (*)(id, SEL, id))objc_msgSend)
+            (textNode, @selector(setAttributedText:), redacted);
+    }
 }
 
 static void ApolloSuppressAuthorInCell(id cell, BOOL isComment) {
     if (isComment) {
         if (ApolloHideUsernamesEnabled())
-            ApolloSuppressAuthorButton(ApolloObjectIvar(cell, "authorNode"), YES);
+            ApolloSuppressAuthorButton(ApolloObjectIvar(cell, "authorNode"), YES, nil);
         return;
     }
     if (!ApolloHideUsernamesEnabled() && !ApolloHidePostAuthorEnabled()) return;
     id postInfo = ApolloObjectIvar(cell, "postInfoNode");
-    ApolloSuppressAuthorButton(ApolloObjectIvar(postInfo, "authorButtonNode"), NO);
+    id model = ApolloObjectIvar(postInfo, "link") ?: ApolloObjectIvar(cell, "link");
+    ApolloSuppressAuthorButton(ApolloObjectIvar(postInfo, "authorButtonNode"),
+                               NO, ApolloAuthorFromModel(model));
 }
 
 // Crossposts can have a second author button nested inside crosspostNode.
@@ -82,10 +165,14 @@ static void ApolloHideCrosspostAuthorSubtree(id node,
     if ([visited containsObject:key]) return;
     [visited addObject:key];
 
-    ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorNode"), NO);
-    ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorButtonNode"), NO);
     id info = ApolloObjectIvar(node, "postInfoNode");
-    if (info) ApolloSuppressAuthorButton(ApolloObjectIvar(info, "authorButtonNode"), NO);
+    id model = ApolloObjectIvar(info, "link") ?:
+               ApolloObjectIvar(node, "crosspostParent") ?:
+               ApolloObjectIvar(node, "link");
+    NSString *author = ApolloAuthorFromModel(model);
+    ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorNode"), NO, author);
+    ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorButtonNode"), NO, author);
+    if (info) ApolloSuppressAuthorButton(ApolloObjectIvar(info, "authorButtonNode"), NO, author);
 
     const char *additionalNodes[] = {
         "originalPostInfoNode", "crosspostInfoNode", "authorInfoNode",
@@ -121,18 +208,21 @@ static void ApolloSuppressCrosspostAuthorInCell(id cell) {
 
 - (id)layoutSpecThatFits:(struct ApolloTextureSizeRange)range {
     if (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) {
-        ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"), NO);
+        ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"),
+                                   NO, ApolloAuthorFromModel(ApolloObjectIvar((id)self, "link")));
     }
     id spec = %orig;
     if (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) {
-        ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"), NO);
+        ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"),
+                                   NO, ApolloAuthorFromModel(ApolloObjectIvar((id)self, "link")));
     }
     return spec;
 }
 
 - (void)didLoad {
     %orig;
-    ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"), NO);
+    ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"),
+                               NO, ApolloAuthorFromModel(ApolloObjectIvar((id)self, "link")));
 }
 
 %end
@@ -141,11 +231,19 @@ static void ApolloSuppressCrosspostAuthorInCell(id cell) {
 - (void)setAttributedText:(NSAttributedString *)text {
     BOOL hideComment = ApolloHideUsernamesEnabled() &&
         [objc_getAssociatedObject(self, &kApolloHiddenCommentAuthorNodeKey) boolValue];
-    BOOL hidePost = (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) &&
-        [objc_getAssociatedObject(self, &kApolloHiddenPostAuthorNodeKey) boolValue];
-    if (hideComment || hidePost) {
+    if (hideComment) {
         %orig(ApolloEmptyAuthorText());
         return;
+    }
+    if (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) {
+        NSString *author = objc_getAssociatedObject(self, &kApolloPostAuthorUsernameKey);
+        NSAttributedString *redacted = ApolloPostTitleWithoutAuthor(text, author);
+        if (redacted) {
+            // Intercept before Texture commits the new text to prevent a
+            // network-delayed author flash without erasing sibling metadata.
+            %orig(redacted);
+            return;
+        }
     }
     %orig;
 }
@@ -155,11 +253,19 @@ static void ApolloSuppressCrosspostAuthorInCell(id cell) {
 - (void)setAttributedText:(NSAttributedString *)text {
     BOOL hideComment = ApolloHideUsernamesEnabled() &&
         [objc_getAssociatedObject(self, &kApolloHiddenCommentAuthorNodeKey) boolValue];
-    BOOL hidePost = (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) &&
-        [objc_getAssociatedObject(self, &kApolloHiddenPostAuthorNodeKey) boolValue];
-    if (hideComment || hidePost) {
+    if (hideComment) {
         %orig(ApolloEmptyAuthorText());
         return;
+    }
+    if (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) {
+        NSString *author = objc_getAssociatedObject(self, &kApolloPostAuthorUsernameKey);
+        NSAttributedString *redacted = ApolloPostTitleWithoutAuthor(text, author);
+        if (redacted) {
+            // Intercept before Texture commits the new text to prevent a
+            // network-delayed author flash without erasing sibling metadata.
+            %orig(redacted);
+            return;
+        }
     }
     %orig;
 }
