@@ -120,9 +120,9 @@ static NSString *const kApolloHidePostInfoUserPrefKey = @"ApolloHideUsernamesInP
 
 - (void)postInfoVisibilityChanged:(UISwitch *)sender {
     [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kApolloHidePostInfoUserPrefKey];
-    // Independent of "Hide Author Usernames". Feed cells can refresh here.
-    // Restart Apollo to rebuild already-loaded PostInfoNode instances when
-    // turning the setting off, since their native views were set hidden.
+    // Independent of "Hide Author Usernames". Ask feed cells to refresh.
+    // Restart Apollo once after upgrading from the old whole-row-hiding IPA
+    // to restore the PostInfoNode views that version left hidden.
     [[NSNotificationCenter defaultCenter]
         postNotificationName:@"com.christianselig.PostCellAppearanceUpdated" object:nil];
 }
@@ -165,18 +165,18 @@ static UITableViewCell *ApolloHideAuthorsSettingsCell(UIViewController *vc, UITa
     return cell;
 }
 
-// Second independent toggle: hide the entire native PostInfoNode view/layout
-// immediately, regardless of the metadata text, username format or language.
-// Existing persisted key is retained to migrate the previous selective switch.
+// Second independent toggle: hide only the PostInfoNode's author button,
+// not the whole row. This preserves subreddit, vote count, comment count,
+// posting time, and other nearby metadata. Existing preference key is kept.
 static UITableViewCell *ApolloHidePostInfoUserSettingsCell(UIViewController *vc,
                                                            UITableViewCell *donor) {
     UITableViewCell *cell = objc_getAssociatedObject(vc, kApolloHidePostInfoUserCellKey);
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-        cell.textLabel.text = @"Hide Post Info";
+        cell.textLabel.text = @"Hide Post Author";
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
-        toggle.accessibilityLabel = @"Hide entire post information row including author and subreddit";
+        toggle.accessibilityLabel = @"Hide post author while preserving votes comments subreddit and posting time";
         [toggle addTarget:[ApolloHideAuthorsToggleTarget sharedTarget]
                    action:@selector(postInfoVisibilityChanged:)
          forControlEvents:UIControlEventValueChanged];
@@ -261,7 +261,7 @@ static const void *kApolloInjSavedCategoriesKey = &kApolloInjSavedCategoriesKey;
             return ApolloHideAuthorsSettingsCell(vc, donor);
         });
 
-    // Keep the old author-only toggle; the second toggle hides the whole metadata row.
+    // The new toggle hides the post author's text only, not surrounding metadata.
     ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
         ^UITableViewCell *(UIViewController *vc, UITableViewCell *donor) {
             return ApolloHidePostInfoUserSettingsCell(vc, donor);
