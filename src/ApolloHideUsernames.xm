@@ -1,14 +1,11 @@
 // ApolloHideUsernames.xm
 // Two independent presentation-only privacy controls:
-// 1) Hide Author Usernames: blank known author buttons in posts/comments.
-// 2) Hide Post Info: suppress the entire PostInfoNode layout, not strings
-//    matching u/ or any other textual identifier.
+// 1) Hide Author Usernames: hide known author buttons in posts AND comments.
+// 2) Hide Post Author: hide only the post author button in post info and
+//    crossposts. This does not remove the rest of PostInfoNode.
 //
-// Reddit models, post titles and comment bodies are never changed.
-// The second preference deliberately also removes subreddit and time labels
-// when they share the same metadata row. This avoids a visible flash while
-// waiting for text processing, because the node produces an empty layout
-// before the feed measures/draws the cell.
+// Reddit models, post titles, subreddit, score, comment count, and post age
+// are never changed. No u/ string matching or delayed regex replacements.
 
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
@@ -18,17 +15,18 @@
 #import "ApolloTextureDecls.h"
 
 static NSString *const kApolloHideUsernamesKey = @"ApolloHidePostCommentUsernames";
-// Preserve the existing defaults key so the old selective toggle's on/off
-// state migrates to the new GENERAL "Hide Post Info" switch.
-static NSString *const kApolloHidePostInfoKey = @"ApolloHideUsernamesInPostInfo";
-static char kApolloHiddenAuthorTextNodeKey;
+// Keep the existing defaults key to preserve the user's switch state,
+// despite renaming the option from "Hide Post Info" to "Hide Post Author".
+static NSString *const kApolloHidePostAuthorKey = @"ApolloHideUsernamesInPostInfo";
+static char kApolloHiddenCommentAuthorNodeKey;
+static char kApolloHiddenPostAuthorNodeKey;
 
 static BOOL ApolloHideUsernamesEnabled(void) {
     return [[NSUserDefaults standardUserDefaults] boolForKey:kApolloHideUsernamesKey];
 }
 
-static BOOL ApolloHidePostInfoEnabled(void) {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:kApolloHidePostInfoKey];
+static BOOL ApolloHidePostAuthorEnabled(void) {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:kApolloHidePostAuthorKey];
 }
 
 static NSAttributedString *ApolloEmptyAuthorText(void) {
@@ -44,25 +42,34 @@ static NSAttributedString *ApolloEmptyAuthorText(void) {
 // arbitrary text node. The first hook marks it before Texture lays it out.
 // The ASTextNode hooks prevent a later attributed-title update from flashing
 // the author's name even when network metadata arrives asynchronously.
-static void ApolloSuppressAuthorButton(id button) {
-    if (!button || ![button respondsToSelector:@selector(titleNode)]) return;
+static void ApolloSuppressAuthorButton(id button, BOOL isComment) {
+    BOOL enabled = isComment ? ApolloHideUsernamesEnabled() :
+        (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled());
+    if (!enabled || !button || ![button respondsToSelector:@selector(titleNode)]) return;
+
     id textNode = ((id (*)(id, SEL))objc_msgSend)(button, @selector(titleNode));
     if (!textNode || ![textNode respondsToSelector:@selector(setAttributedText:)]) return;
 
-    objc_setAssociatedObject(textNode, &kApolloHiddenAuthorTextNodeKey, @YES,
+    // Different markers make the independent switches truly independent;
+    // enabling "Hide Post Author" never affects comment author labels.
+    const void *marker = isComment
+        ? (const void *)&kApolloHiddenCommentAuthorNodeKey
+        : (const void *)&kApolloHiddenPostAuthorNodeKey;
+    objc_setAssociatedObject(textNode, marker, @YES,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     ((void (*)(id, SEL, id))objc_msgSend)(textNode, @selector(setAttributedText:),
                                           ApolloEmptyAuthorText());
 }
 
 static void ApolloSuppressAuthorInCell(id cell, BOOL isComment) {
-    if (!ApolloHideUsernamesEnabled()) return;
     if (isComment) {
-        ApolloSuppressAuthorButton(ApolloObjectIvar(cell, "authorNode"));
+        if (ApolloHideUsernamesEnabled())
+            ApolloSuppressAuthorButton(ApolloObjectIvar(cell, "authorNode"), YES);
         return;
     }
+    if (!ApolloHideUsernamesEnabled() && !ApolloHidePostAuthorEnabled()) return;
     id postInfo = ApolloObjectIvar(cell, "postInfoNode");
-    ApolloSuppressAuthorButton(ApolloObjectIvar(postInfo, "authorButtonNode"));
+    ApolloSuppressAuthorButton(ApolloObjectIvar(postInfo, "authorButtonNode"), NO);
 }
 
 // Crossposts can have a second author button nested inside crosspostNode.
@@ -75,10 +82,10 @@ static void ApolloHideCrosspostAuthorSubtree(id node,
     if ([visited containsObject:key]) return;
     [visited addObject:key];
 
-    ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorNode"));
-    ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorButtonNode"));
+    ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorNode"), NO);
+    ApolloSuppressAuthorButton(ApolloObjectIvar(node, "authorButtonNode"), NO);
     id info = ApolloObjectIvar(node, "postInfoNode");
-    if (info) ApolloSuppressAuthorButton(ApolloObjectIvar(info, "authorButtonNode"));
+    if (info) ApolloSuppressAuthorButton(ApolloObjectIvar(info, "authorButtonNode"), NO);
 
     const char *additionalNodes[] = {
         "originalPostInfoNode", "crosspostInfoNode", "authorInfoNode",
@@ -99,50 +106,44 @@ static void ApolloHideCrosspostAuthorSubtree(id node,
 }
 
 static void ApolloSuppressCrosspostAuthorInCell(id cell) {
-    if (!ApolloHideUsernamesEnabled()) return;
+    if (!ApolloHideUsernamesEnabled() && !ApolloHidePostAuthorEnabled()) return;
     id crosspost = ApolloObjectIvar(cell, "crosspostNode");
     if (crosspost) {
         ApolloHideCrosspostAuthorSubtree(crosspost, [NSMutableSet set], 0);
     }
 }
 
-// This runs for ALL post info layouts: feed (compact/large), post detail
-// header and nested crosspost post-info nodes. No scanning of "u/" tokens,
-// username guessing, attributed-string mutation, or delayed hiding.
+// Unlike the previous version, preserve PostInfoNode's native layout.
+// Hiding the entire node accidentally removed score, comment count, post age,
+// subreddit and other metadata. Only the authorButtonNode title is suppressed
+// before the node is measured, and its late text changes stay hidden.
 %hook _TtC6Apollo12PostInfoNode
 
 - (id)layoutSpecThatFits:(struct ApolloTextureSizeRange)range {
-    if (!ApolloHidePostInfoEnabled()) return %orig;
-    Class stackClass = objc_getClass("ASStackLayoutSpec");
-    if (stackClass &&
-        [stackClass respondsToSelector:@selector(stackLayoutSpecWithDirection:spacing:justifyContent:alignItems:children:)]) {
-        return [(id)stackClass stackLayoutSpecWithDirection:0
-                                                  spacing:0
-                                           justifyContent:0
-                                               alignItems:0
-                                                 children:@[]];
+    if (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) {
+        ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"), NO);
     }
-    return %orig;
+    id spec = %orig;
+    if (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) {
+        ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"), NO);
+    }
+    return spec;
 }
 
 - (void)didLoad {
     %orig;
-    // Logos only forward-declares Apollo's Swift PostInfoNode class. Cast to
-    // id before Objective-C message dispatch to avoid compile-time receiver
-    // type validation for a class whose full interface is unavailable.
-    id postInfoNode = (id)self;
-    if (ApolloHidePostInfoEnabled() &&
-        [postInfoNode respondsToSelector:@selector(setHidden:)]) {
-        ((void (*)(id, SEL, BOOL))objc_msgSend)(postInfoNode, @selector(setHidden:), YES);
-    }
+    ApolloSuppressAuthorButton(ApolloObjectIvar((id)self, "authorButtonNode"), NO);
 }
 
 %end
 
 %hook ASTextNode
 - (void)setAttributedText:(NSAttributedString *)text {
-    if (ApolloHideUsernamesEnabled() &&
-        [objc_getAssociatedObject(self, &kApolloHiddenAuthorTextNodeKey) boolValue]) {
+    BOOL hideComment = ApolloHideUsernamesEnabled() &&
+        [objc_getAssociatedObject(self, &kApolloHiddenCommentAuthorNodeKey) boolValue];
+    BOOL hidePost = (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) &&
+        [objc_getAssociatedObject(self, &kApolloHiddenPostAuthorNodeKey) boolValue];
+    if (hideComment || hidePost) {
         %orig(ApolloEmptyAuthorText());
         return;
     }
@@ -152,8 +153,11 @@ static void ApolloSuppressCrosspostAuthorInCell(id cell) {
 
 %hook ASTextNode2
 - (void)setAttributedText:(NSAttributedString *)text {
-    if (ApolloHideUsernamesEnabled() &&
-        [objc_getAssociatedObject(self, &kApolloHiddenAuthorTextNodeKey) boolValue]) {
+    BOOL hideComment = ApolloHideUsernamesEnabled() &&
+        [objc_getAssociatedObject(self, &kApolloHiddenCommentAuthorNodeKey) boolValue];
+    BOOL hidePost = (ApolloHideUsernamesEnabled() || ApolloHidePostAuthorEnabled()) &&
+        [objc_getAssociatedObject(self, &kApolloHiddenPostAuthorNodeKey) boolValue];
+    if (hideComment || hidePost) {
         %orig(ApolloEmptyAuthorText());
         return;
     }
