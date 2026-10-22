@@ -127,11 +127,13 @@ static void ApolloSuppressCrosspostAuthorInCell(id cell) {
 
 - (void)didLoad {
     %orig;
-    // A loaded metadata view must not show retained children from a previous
-    // layout while the parent is remeasured. Restart Apollo to fully restore
-    // existing cached cells when this preference is disabled.
-    if (ApolloHidePostInfoEnabled() && [self respondsToSelector:@selector(setHidden:)]) {
-        ((void (*)(id, SEL, BOOL))objc_msgSend)(self, @selector(setHidden:), YES);
+    // Logos only forward-declares Apollo's Swift PostInfoNode class. Cast to
+    // id before Objective-C message dispatch to avoid compile-time receiver
+    // type validation for a class whose full interface is unavailable.
+    id postInfoNode = (id)self;
+    if (ApolloHidePostInfoEnabled() &&
+        [postInfoNode respondsToSelector:@selector(setHidden:)]) {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(postInfoNode, @selector(setHidden:), YES);
     }
 }
 
