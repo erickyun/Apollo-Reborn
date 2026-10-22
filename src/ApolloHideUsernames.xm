@@ -160,7 +160,8 @@ static void ApolloMarkPostInfoTextTree(id root, NSString *author,
             ApolloMarkPostInfoTextTree(child, author, seen, depth + 1);
         }
     }
-    const SEL oneSelectors[] = { @selector(child), @selector(background) };
+    const SEL oneSelectors[] = { @selector(child), @selector(background),
+                                 @selector(titleNode) };
     for (NSUInteger i = 0; i < sizeof(oneSelectors)/sizeof(oneSelectors[0]); i++) {
         SEL sel = oneSelectors[i];
         if ([root respondsToSelector:sel]) {
