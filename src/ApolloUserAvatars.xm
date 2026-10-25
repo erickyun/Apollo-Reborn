@@ -34,6 +34,7 @@
 #import "ApolloSwiftRuntime.h"
 #import "ApolloClasses.h"
 #import "ApolloUserAvatars.h"
+#import "ApolloAvatarVisibility.h"
 
 static NSString *const ApolloUserAvatarsToggleChangedNotification = @"ApolloUserAvatarsToggleChangedNotification";
 static NSString *const ApolloProfileLayoutStructureChangedMarker = @"ApolloProfileLayoutStructureChanged";
@@ -965,6 +966,19 @@ static UIFont *ApolloProfileClassicNameFont(void) {
     ApolloIdentityHeaderLayout identity = ApolloIdentityHeaderLayoutMakeWithBanner(width, [self apollo_bannerHeight]);
     if (!sProfileHeaderImmersive) {
         [self apollo_applyClassicIdentityOverrides:&identity forWidth:width];
+    }
+    if (sHideAllUserAvatars) {
+        // Without a portrait, don't reserve its 96pt height (or the
+        // Classic leading column). Keep display name / handle full-width
+        // and start directly below the banner, regardless of density.
+        CGFloat bannerHeight = [self apollo_bannerHeight];
+        CGFloat nameY = bannerHeight + (bannerHeight > 0 ? 10.0 : 14.0);
+        identity.avatarFrame = CGRectZero;
+        identity.nameFrame = CGRectMake(identity.bodyX, nameY,
+                                        identity.bodyWidth, identity.nameFrame.size.height);
+        identity.subnameFrame = CGRectMake(identity.bodyX, CGRectGetMaxY(identity.nameFrame) + 1.0,
+                                           identity.bodyWidth, identity.subnameFrame.size.height);
+        identity.bodyY = CGRectGetMaxY(identity.subnameFrame) + 12.0;
     }
     return identity;
 }
@@ -2925,7 +2939,7 @@ static BOOL ApolloInlineAvatarShouldLog(NSUInteger *counter) {
 
 static BOOL ApolloPrepareAvatarRewriteForTextNode(id textNode, NSAttributedString *incomingAttributedText, NSAttributedString **swapOut) {
     if (swapOut) *swapOut = nil;
-    if (!textNode || !sShowUserAvatars) return NO;
+    if (!textNode || !ApolloInlineUserAvatarsEnabled()) return NO;
     if ([objc_getAssociatedObject(textNode, kApolloAvatarApplyingTextKey) boolValue]) return NO;
     if (![objc_getAssociatedObject(textNode, kApolloAvatarOwnedTextNodeKey) boolValue]) return NO;
     if (![incomingAttributedText isKindOfClass:[NSAttributedString class]] || incomingAttributedText.length == 0) return NO;
@@ -3005,7 +3019,7 @@ static void ApolloInlineAvatarInfoRequestDidFinish(void) {
 // actually starts a fresh fetch for a username with no fetch in flight.
 static void ApolloInlineAvatarStartInfoRequest(id cell, NSString *username, BOOL piggyback) {
     if (!cell) return;
-    if (!sShowUserAvatars || !ApolloInlineAvatarCellUsernameMatches(cell, username) ||
+    if (!ApolloInlineUserAvatarsEnabled() || !ApolloInlineAvatarCellUsernameMatches(cell, username) ||
         !ApolloBindInlineAvatarTextNodeForCell(cell, username)) {
         ApolloClearPendingInlineAvatarFetch(cell, username);
         return;
@@ -3031,7 +3045,7 @@ static void ApolloInlineAvatarStartInfoRequest(id cell, NSString *username, BOOL
         id cellNow = weakCell;
         if (!cellNow) return;
         ApolloClearPendingInlineAvatarFetch(cellNow, username);
-        if (!sShowUserAvatars || !info.iconURL) return;
+        if (!ApolloInlineUserAvatarsEnabled() || !info.iconURL) return;
         ApolloApplyInlineAvatarInfoToCell(cellNow, username, info);
     }];
 }
@@ -3107,7 +3121,7 @@ static BOOL ApolloBindInlineAvatarTextNodeForCell(id cell, NSString *username) {
 
 static BOOL ApolloApplyInlineAvatarPlaceholderToCell(id cell, NSString *username) {
     username = ApolloAvatarNormalizedUsername(username);
-    if (!cell || username.length == 0 || !sShowUserAvatars) return NO;
+    if (!cell || username.length == 0 || !ApolloInlineUserAvatarsEnabled()) return NO;
     if (!ApolloBindInlineAvatarTextNodeForCell(cell, username)) return NO;
 
     BOOL applied = ApolloApplyAvatarRenderToCell(cell, username, nil, nil, nil);
@@ -3135,7 +3149,7 @@ static void ApolloScheduleInlineAvatarLateReapplyForCell(id cell, NSString *user
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             id strongCell = weakCell;
             if (!strongCell) return;
-            if (!sShowUserAvatars || !ApolloInlineAvatarCellUsernameMatches(strongCell, username)) {
+            if (!ApolloInlineUserAvatarsEnabled() || !ApolloInlineAvatarCellUsernameMatches(strongCell, username)) {
                 objc_setAssociatedObject(strongCell, kApolloAvatarPendingLateReapplyUsernameKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
                 return;
             }
@@ -3170,7 +3184,7 @@ static void ApolloScheduleInlineAvatarLateReapplyForCell(id cell, NSString *user
 
 static void ApolloApplyInlineAvatarInfoToCell(id cell, NSString *username, ApolloUserProfileInfo *info) {
     username = ApolloAvatarNormalizedUsername(username);
-    if (!cell || username.length == 0 || !sShowUserAvatars || !info.iconURL) return;
+    if (!cell || username.length == 0 || !ApolloInlineUserAvatarsEnabled() || !info.iconURL) return;
     if (!ApolloBindInlineAvatarTextNodeForCell(cell, username)) return;
 
     ApolloUserProfileCache *cache = [ApolloUserProfileCache sharedCache];
@@ -3191,7 +3205,7 @@ static void ApolloApplyInlineAvatarInfoToCell(id cell, NSString *username, Apoll
     __weak id weakCell = cell;
     [cache requestImageForURL:info.iconURL completion:^(UIImage *loadedImage) {
         id cellNow = weakCell;
-        if (!cellNow || !sShowUserAvatars || !loadedImage) return;
+        if (!cellNow || !ApolloInlineUserAvatarsEnabled() || !loadedImage) return;
         if (!ApolloBindInlineAvatarTextNodeForCell(cellNow, username)) return;
         UIImage *loadedDecoratorImage = info.decoratorURL ? [cache cachedImageForURL:info.decoratorURL] : nil;
         BOOL applied = ApolloApplyAvatarRenderToCell(cellNow, username, info, loadedImage, loadedDecoratorImage);
@@ -3261,7 +3275,7 @@ static void ApolloScheduleInlineAvatarInfoFetchAttempt(id cell, NSString *userna
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         id strongCell = weakCell;
         if (!strongCell) return;
-        if (!sShowUserAvatars) {
+        if (!ApolloInlineUserAvatarsEnabled()) {
             ApolloClearPendingInlineAvatarFetch(strongCell, username);
             return;
         }
@@ -3338,7 +3352,7 @@ static void ApolloApplyAvatarToCellWithDiameter(id cell, NSString *username, CGF
         return;
     }
 
-    if (!sShowUserAvatars) {
+    if (!ApolloInlineUserAvatarsEnabled()) {
         ApolloRestoreAvatarForCell(cell);
         return;
     }
@@ -3392,7 +3406,7 @@ static id ApolloAuthorTitleTextNodeForCell(id cell, NSString *username) {
 }
 
 static void ApolloBindAvatarAtMeasureForCell(id cell, NSString *modelIvarName, CGFloat diameter) {
-    if (!sShowUserAvatars || !cell) return;
+    if (!ApolloInlineUserAvatarsEnabled() || !cell) return;
 
     // A re-measure of an already bound cell: nothing to do.
     id boundNode = objc_getAssociatedObject(cell, kApolloAvatarTextNodeKey);
@@ -3475,15 +3489,17 @@ static UIImage *ApolloProfilePlaceholderAvatar(void) {
 }
 
 static void ApolloProfileSetSnoovatarMode(ApolloProfileHeaderView *header, BOOL showSnoovatar) {
-    BOOL currentlyShowing = !header.snoovatarImageView.hidden;
-    if (currentlyShowing == showSnoovatar) return;
-    header.snoovatarImageView.hidden = !showSnoovatar;
-    header.avatarBorderView.hidden = showSnoovatar;
-    header.avatarImageView.hidden = showSnoovatar;
+    // Global privacy mode suppresses both profile avatar variants.
+    BOOL showSnoovatarImage = showSnoovatar && !sHideAllUserAvatars;
+    BOOL showAvatarImage = !showSnoovatar && !sHideAllUserAvatars;
+    if (header.snoovatarImageView.hidden == !showSnoovatarImage &&
+        header.avatarBorderView.hidden == !showAvatarImage &&
+        header.avatarImageView.hidden == !showAvatarImage) return;
+    header.snoovatarImageView.hidden = !showSnoovatarImage;
+    header.avatarBorderView.hidden = !showAvatarImage;
+    header.avatarImageView.hidden = !showAvatarImage;
     [header setNeedsLayout];
-    if (header.heightInvalidationBlock) {
-        header.heightInvalidationBlock();
-    }
+    if (header.heightInvalidationBlock) header.heightInvalidationBlock();
 }
 
 static ApolloProfileHeaderView *ApolloProfileCreateHeader(CGFloat width) {
@@ -4375,7 +4391,7 @@ static void ApolloProfileInstallOrUpdateHeader(id viewControllerObject) {
 
     // "Show Detailed Profiles" OFF → revert to Apollo's stock profile layout. Tear
     // down anything we previously installed and bail before building/refreshing it.
-    // (Independent of sShowUserAvatars, which only governs the inline username avatars.)
+    // (Independent of ApolloInlineUserAvatarsEnabled(), which only governs the inline username avatars.)
     if (!sShowDetailedProfiles) {
         ApolloProfileRemoveHeader(viewControllerObject, tableView);
         return;
@@ -4389,7 +4405,7 @@ static void ApolloProfileInstallOrUpdateHeader(id viewControllerObject) {
     // profile page's OWN content, not one of the inline avatars the
     // "Show User Profile Pictures" toggle governs. It must stay visible
     // regardless of that toggle — a profile always shows the stuff in it.
-    // (Inline comment/feed/chat/mod-list avatars stay gated on sShowUserAvatars;
+    // (Inline comment/feed/chat/mod-list avatars stay gated on ApolloInlineUserAvatarsEnabled();
     // the gate is intentionally absent here so toggling the feature off leaves
     // profile avatars/banners alone and intact.)
 
@@ -4930,7 +4946,7 @@ static BOOL ApolloProfileImageViewIsProfileTabAvatarSlot(UIImageView *imageView)
     // feature only exists when this toggle is on (default off), and no image view
     // carries the avatar marker while it's off — so short-circuit before the
     // ~9-level class-name superview walk instead of running it per image set.
-    if (!sUseProfileAvatarTabIcon) return NO;
+    if (!sUseProfileAvatarTabIcon || sHideAllUserAvatars) return NO;
     if (ApolloProfileImageViewShowsTabAvatar(imageView)) return YES;
     UITabBarItem *item = ApolloProfileTabItemForIconImageView(imageView);
     return item && [objc_getAssociatedObject(item, ApolloProfileTabAvatarActiveKey()) boolValue];
@@ -5007,7 +5023,7 @@ static void ApolloProfileSetTabAvatarImage(UITabBarItem *item, UIImage *sourceIm
 
 static void ApolloProfileApplyTabAvatarForController(UITabBarController *tabBarController) {
     UITabBarItem *item = ApolloProfileTabItemForController(tabBarController);
-    if (!sUseProfileAvatarTabIcon) {
+    if (!sUseProfileAvatarTabIcon || sHideAllUserAvatars) {
         ApolloProfileRestoreTabAvatarItem(item);
         return;
     }
@@ -5032,10 +5048,10 @@ static void ApolloProfileApplyTabAvatarForController(UITabBarController *tabBarC
 
     __weak UITabBarController *weakTabBarController = tabBarController;
     [cache requestInfoForUsername:username completion:^(ApolloUserProfileInfo *info) {
-        if (!sUseProfileAvatarTabIcon || !info.iconURL) return;
+        if (!sUseProfileAvatarTabIcon || sHideAllUserAvatars || !info.iconURL) return;
         [cache requestImageForURL:info.iconURL completion:^(UIImage *image) {
             UITabBarController *strongTabBarController = weakTabBarController;
-            if (!sUseProfileAvatarTabIcon || !strongTabBarController || !image) return;
+            if (!sUseProfileAvatarTabIcon || sHideAllUserAvatars || !strongTabBarController || !image) return;
             UITabBarItem *currentItem = ApolloProfileTabItemForController(strongTabBarController);
             NSString *currentUsername = ApolloProfileTabUsernameForController(strongTabBarController);
             if (!ApolloAvatarUsernameMatches(currentUsername, username)) return;
@@ -5070,7 +5086,7 @@ static void ApolloProfileApplyTabAvatarForVisibleWindows(void) {
 
 static void ApolloProfileScheduleTabAvatarRefresh(NSString *reason) {
     ApolloProfileApplyTabAvatarForVisibleWindows();
-    if (!sUseProfileAvatarTabIcon) {
+    if (!sUseProfileAvatarTabIcon || sHideAllUserAvatars) {
         if (reason.length > 0) {
             ApolloLog(@"[UserAvatars] Restored profile tab icon after %@", reason);
         }
@@ -5081,7 +5097,7 @@ static void ApolloProfileScheduleTabAvatarRefresh(NSString *reason) {
     for (NSNumber *delayNumber in delays) {
         NSTimeInterval delay = delayNumber.doubleValue;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (!sUseProfileAvatarTabIcon) return;
+            if (!sUseProfileAvatarTabIcon || sHideAllUserAvatars) return;
             ApolloProfileApplyTabAvatarForVisibleWindows();
         });
     }
@@ -5096,7 +5112,7 @@ void ApolloRefreshProfileTabAvatarAfterPresentation(void) {
 }
 
 static void ApolloProfileScheduleAccountChangeTabAvatarRefresh(NSString *reason) {
-    if (!sUseProfileAvatarTabIcon) return;
+    if (!sUseProfileAvatarTabIcon || sHideAllUserAvatars) return;
     ApolloProfileScheduleTabAvatarRefresh(reason ?: @"account change");
 }
 
@@ -5218,7 +5234,7 @@ static void ApolloProfileSetUserFollowed(NSString *username, BOOL follow, Apollo
 %hook ASTextNode
 
 - (void)setAttributedText:(NSAttributedString *)attributedText {
-    if (!sShowUserAvatars) {
+    if (!ApolloInlineUserAvatarsEnabled()) {
         %orig;
         return;
     }
@@ -5248,7 +5264,7 @@ static void ApolloProfileSetUserFollowed(NSString *username, BOOL follow, Apollo
 %hook ASTextNode2
 
 - (void)setAttributedText:(NSAttributedString *)attributedText {
-    if (!sShowUserAvatars) {
+    if (!ApolloInlineUserAvatarsEnabled()) {
         %orig;
         return;
     }
@@ -5311,7 +5327,7 @@ static void ApolloInlineAvatarFireBatchNow(void) {
 // YES when any of `fullNames` joined a batch (and will be looked up within ~0.6s).
 // All of them join before the burst check, so a feed page's authors leave as one.
 static BOOL ApolloInlineAvatarEnqueueFullNamesForBatch(NSArray<NSString *> *fullNames) {
-    if (!sShowUserAvatars) return NO;
+    if (!ApolloInlineUserAvatarsEnabled()) return NO;
     BOOL joined = NO;
     for (NSString *fullName in fullNames) {
         if (![fullName isKindOfClass:[NSString class]] || ![fullName hasPrefix:@"t2_"]) continue;
@@ -5405,13 +5421,13 @@ struct CDStruct_90e057aa { CGSize min; CGSize max; };
 // handful of batched requests, and making the avatar already-present on scroll.
 - (void)didEnterPreloadState {
     %orig;
-    if (!sShowUserAvatars) return;
+    if (!ApolloInlineUserAvatarsEnabled()) return;
     ApolloInlineAvatarBatchEnqueueFromCommentCell(self);
 }
 
 - (void)didLoad {
     %orig;
-    if (!sShowUserAvatars) return;
+    if (!ApolloInlineUserAvatarsEnabled()) return;
     ApolloInlineAvatarBatchEnqueueFromCommentCell(self);
     ApolloApplyAvatarToCellWithDiameter(self, ApolloUsernameFromCell(self, @"comment"), ApolloCommentInlineAvatarDiameter);
 }
@@ -5430,13 +5446,13 @@ struct CDStruct_90e057aa { CGSize min; CGSize max; };
 // Limiting only) usually lands before the cell is on screen.
 - (void)didEnterPreloadState {
     %orig;
-    if (!sShowUserAvatars) return;
+    if (!ApolloInlineUserAvatarsEnabled()) return;
     ApolloInlineAvatarBatchEnqueueFromPostCell(self);
 }
 
 - (void)didLoad {
     %orig;
-    if (!sShowUserAvatars) return;
+    if (!ApolloInlineUserAvatarsEnabled()) return;
     ApolloApplyAvatarToCellWithDiameter(self, ApolloUsernameFromCell(self, @"link"), ApolloFeedInlineAvatarDiameter);
 }
 
@@ -5446,7 +5462,7 @@ struct CDStruct_90e057aa { CGSize min; CGSize max; };
 
 - (void)didLoad {
     %orig;
-    if (!sShowUserAvatars) return;
+    if (!ApolloInlineUserAvatarsEnabled()) return;
     ApolloApplyAvatarToCellWithDiameter(self, ApolloUsernameFromCell(self, @"link"), ApolloFeedInlineAvatarDiameter);
 }
 
@@ -5456,13 +5472,13 @@ struct CDStruct_90e057aa { CGSize min; CGSize max; };
 
 - (void)didEnterPreloadState {
     %orig;
-    if (!sShowUserAvatars) return;
+    if (!ApolloInlineUserAvatarsEnabled()) return;
     ApolloInlineAvatarBatchEnqueueFromPostCell(self);
 }
 
 - (void)didLoad {
     %orig;
-    if (!sShowUserAvatars) return;
+    if (!ApolloInlineUserAvatarsEnabled()) return;
     ApolloApplyAvatarToCellWithDiameter(self, ApolloUsernameFromCell(self, @"link"), ApolloFeedInlineAvatarDiameter);
 }
 
@@ -5568,7 +5584,7 @@ static void ApolloAvatarApplySubredditIconToSharePreview(id postInfo, NSString *
 %hook _TtC6Apollo22SaveAsImagePreviewNode
 
 - (id)layoutSpecThatFits:(struct CDStruct_90e057aa)constrainedSize {
-    if ((sShowUserAvatars || ApolloNativeShowSubredditIconsForPosts()) &&
+    if ((ApolloInlineUserAvatarsEnabled() || ApolloNativeShowSubredditIconsForPosts()) &&
         ![objc_getAssociatedObject(self, &kApolloAvatarSharePreviewAppliedKey) boolValue]) {
         // Synchronous flip: layout passes come in bursts on multiple threads.
         objc_setAssociatedObject(self, &kApolloAvatarSharePreviewAppliedKey, (id)kCFBooleanTrue, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -5588,7 +5604,7 @@ static void ApolloAvatarApplySubredditIconToSharePreview(id postInfo, NSString *
             // Each icon follows its own setting, mirroring the live byline:
             // author avatar = the tweak's user avatars option, subreddit
             // icon = Apollo's native subreddit icons option.
-            if (sShowUserAvatars && !hideUsernames) {
+            if (ApolloInlineUserAvatarsEnabled() && !hideUsernames) {
                 ApolloApplyAvatarToCellWithDiameter(node, username, ApolloFeedInlineAvatarDiameter);
             }
             if (ApolloNativeShowSubredditIconsForPosts() && !hideSubreddit) {
@@ -6147,7 +6163,7 @@ static void ApolloInlineAvatarReapplyAfterModelUpdate(NSString *fullName) {
                                                       object:nil
                                                        queue:nil
                                                   usingBlock:^(NSNotification *note) {
-        if (!sShowUserAvatars || ![NSThread isMainThread]) return;
+        if (!ApolloInlineUserAvatarsEnabled() || ![NSThread isMainThread]) return;
         id model = note.object;
         if (![model isMemberOfClass:ApolloClassRDKComment]) return;
         if (![model respondsToSelector:@selector(fullName)]) return;
