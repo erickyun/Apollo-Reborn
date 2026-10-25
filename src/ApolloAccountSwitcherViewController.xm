@@ -81,6 +81,12 @@ static UIImage *ApolloSwitcherCircularImage(UIImage *sourceImage, CGFloat diamet
 }
 
 static void ApolloSwitcherApplyAvatarToCell(UITableViewCell *cell, NSString *username, UITraitCollection *traitCollection) {
+    if (sHideAllUserAvatars) {
+        // Clear reused cells too; they may have displayed a previous account.
+        objc_setAssociatedObject(cell, kApolloSwitcherAvatarUsernameKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        cell.imageView.image = nil;
+        return;
+    }
     if (username.length == 0) return;
     objc_setAssociatedObject(cell, kApolloSwitcherAvatarUsernameKey, username, OBJC_ASSOCIATION_COPY_NONATOMIC);
     cell.imageView.image = ApolloSwitcherCircularImage(nil, kApolloSwitcherAvatarDiameter, traitCollection);
@@ -89,7 +95,7 @@ static void ApolloSwitcherApplyAvatarToCell(UITableViewCell *cell, NSString *use
     __weak UITableViewCell *weakCell = cell;
     [cache requestInfoForUsername:username completion:^(ApolloUserProfileInfo *info) {
         UITableViewCell *c1 = weakCell;
-        if (!c1 || ![objc_getAssociatedObject(c1, kApolloSwitcherAvatarUsernameKey) isEqualToString:username]) return;
+        if (sHideAllUserAvatars || !c1 || ![objc_getAssociatedObject(c1, kApolloSwitcherAvatarUsernameKey) isEqualToString:username]) return;
 
         NSURL *imageURL = info.iconURL ?: info.snoovatarURL;
         if (!imageURL) return; // no avatar available — keep neutral placeholder
@@ -99,7 +105,7 @@ static void ApolloSwitcherApplyAvatarToCell(UITableViewCell *cell, NSString *use
             UIImage *circular = ApolloSwitcherCircularImage(image, kApolloSwitcherAvatarDiameter, traitCollection);
             dispatch_async(dispatch_get_main_queue(), ^{
                 UITableViewCell *c2 = weakCell;
-                if (!c2 || ![objc_getAssociatedObject(c2, kApolloSwitcherAvatarUsernameKey) isEqualToString:username]) return;
+                if (sHideAllUserAvatars || !c2 || ![objc_getAssociatedObject(c2, kApolloSwitcherAvatarUsernameKey) isEqualToString:username]) return;
                 c2.imageView.image = circular;
                 [c2 setNeedsLayout];
             });
