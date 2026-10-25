@@ -2016,6 +2016,20 @@ typedef NS_ENUM(NSInteger, Tag) {
 - (ApolloSettingsSection *)buildPostsFeedSection {
     __weak typeof(self) weakSelf = self;
 
+    ApolloSettingsRow *hideFeedImages =
+        [ApolloSettingsRow switchRowWithID:@"feed.hideImagePreviews"
+                                     title:@"Hide Media in Feed"
+                                      isOn:^BOOL { return sHideFeedPostImages; }
+                                  onToggle:^(UISwitch *sender) {
+            sHideFeedPostImages = sender.on;
+            [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:UDKeyHideFeedPostImages];
+            // Rebuild feed cells on the standard appearance update route.
+            // The post detail header is never affected by this setting.
+            [NSNotificationCenter.defaultCenter
+                postNotificationName:@"com.christianselig.PostCellAppearanceUpdated"
+                              object:nil];
+        }];
+
     ApolloSettingsRow *textPostThumbnails =
         [ApolloSettingsRow switchRowWithID:@"media.textPostThumbnails"
                                      title:@"Text Post Thumbnails"
@@ -2076,8 +2090,8 @@ typedef NS_ENUM(NSInteger, Tag) {
     devvitFeedPosts.visible = ^BOOL { return [[NSUserDefaults standardUserDefaults] boolForKey:UDKeyDevvitInteractivePosts]; };
 
     return [ApolloSettingsSection sectionWithTitle:@"Feed"
-                                            footer:@"Feed Video Scrubber: drag the bar under a feed video to scrub it.\n\nSmoother Video Scrolling: prepares feed videos in the background and lets video posts finish drawing right after they scroll in instead of holding the frame for them. Turn off to get Apollo's original behavior back.\n\nForget Forward Swipe After Scrolling: once you've scrolled a few posts on, a forward swipe won't reopen the post you came back from.\n\nLive Interactive Posts: shows live scores, polls, brackets and other interactive posts instead of placeholder text. Show in Feed adds them to the feed as well as comments."
-                                              rows:@[ textPostThumbnails, infoRow, feedScrubber, videoScrollSmoothing, forwardSwipeForget, blockAnnouncements, devvitPosts, devvitFeedPosts ]];
+                                            footer:@"Hide Media in Feed: show only text in Home/subreddit feeds by hiding picture, gallery, video, and external-link previews. Open the post to view its media as usual.\n\nFeed Video Scrubber: drag the bar under a feed video to scrub it.\n\nSmoother Video Scrolling: prepares feed videos in the background and lets video posts finish drawing right after they scroll in instead of holding the frame for them. Turn off to get Apollo's original behavior back.\n\nForget Forward Swipe After Scrolling: once you've scrolled a few posts on, a forward swipe won't reopen the post you came back from.\n\nLive Interactive Posts: shows live scores, polls, brackets and other interactive posts instead of placeholder text. Show in Feed adds them to the feed as well as comments."
+                                              rows:@[ hideFeedImages, textPostThumbnails, infoRow, feedScrubber, videoScrollSmoothing, forwardSwipeForget, blockAnnouncements, devvitPosts, devvitFeedPosts ]];
 }
 
 - (ApolloSettingsSection *)buildPostsFloatingTabsSection {
