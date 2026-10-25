@@ -21,6 +21,7 @@
 #import "ApolloMemoryDiagnostics.h"
 #import "ApolloUserProfileCache.h"
 #import "ApolloState.h"
+#import "ApolloAvatarVisibility.h"
 #import "ApolloImageChestResolver.h"
 #import <ImageIO/ImageIO.h>
 #import <UIKit/UIKit.h>
@@ -1100,7 +1101,7 @@ static void ApolloChatSwapAvatarImageInCell(id scell, NSString *author, UIImage 
 
 // Stamp the sender's avatar into the bubble header (next to the username).
 static void ApolloChatApplyAvatarToCell(id cell) {
-    if (!sShowUserAvatars) return;
+    if (!ApolloInlineUserAvatarsEnabled()) return;
     UILabel *label = ApolloChatMessageLabel(cell);
     if (!label || label.hidden || label.attributedText.length == 0) return;   // image cells hide the label
     NSString *author = ApolloChatAuthorFromLabel(label);
@@ -1401,7 +1402,7 @@ static CGFloat ApolloChatBubbleDrawnTextHeight(NSAttributedString *text, CGFloat
         options != (NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading)) return measured;
     // The calculator integral-rounds this rect, adds the label insets, and the flow-layout hooks
     // add the avatar widening; the label's text column is what remains of that width.
-    BOOL avatarPrefix = sShowUserAvatars;
+    BOOL avatarPrefix = ApolloInlineUserAvatarsEnabled();
     CGFloat width = CGRectGetWidth(CGRectIntegral(measured)) + (avatarPrefix ? kApolloChatAvatarBubbleWidening : 0.0);
     CGFloat drawnHeight = ApolloChatBubbleDrawnTextHeight(self, width, avatarPrefix, CGRectGetHeight(measured));
     if (drawnHeight <= 0) return measured;
@@ -1417,7 +1418,7 @@ static void ApolloChatAdjustLayoutAttributes(NSDictionary *map, UICollectionView
     NSValue *mv = map.count ? map[ApolloChatIndexKey(indexPath)] : nil;
     if (mv) {
         ApolloChatSetCGSizeIvar(la, "messageContainerSize", mv.CGSizeValue);
-    } else if (sShowUserAvatars) {
+    } else if (ApolloInlineUserAvatarsEnabled()) {
         // Widen text bubbles so the avatar prefix doesn't push the timestamp onto
         // a second header line where it hides the message body.
         CGSize cur = ApolloChatGetCGSizeIvar(la, "messageContainerSize");
