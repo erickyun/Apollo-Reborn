@@ -3278,7 +3278,7 @@ static void ApolloScheduleInlineAvatarInfoFetchAttempt(id cell, NSString *userna
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         id strongCell = weakCell;
         if (!strongCell) return;
-        if (!ApolloInlineUserAvatarsEnabled()) {
+        if (!ApolloInlineAuthorAvatarEnabledForCell(strongCell)) {
             ApolloClearPendingInlineAvatarFetch(strongCell, username);
             return;
         }
