@@ -3809,6 +3809,8 @@ static void ApolloShowRedditRateLimitToast(NSTimeInterval seconds) {
                                     UDKeyCommentLinkPreferNative: @NO,
                                     UDKeyShareLinkHost: @(ShareLinkHostDefault),
                                     UDKeyShowUserAvatars: @NO,
+                                    UDKeyHideAllUserAvatars: @NO,
+                                    UDKeyHideFeedPostImages: @NO,
                                     UDKeyUseProfileAvatarTabIcon: @NO,
                                     UDKeyHideTabBarTitles: @NO,
                                     UDKeyUnreadBadgeCompactTabBar: @NO,
@@ -4111,6 +4113,8 @@ static void ApolloShowRedditRateLimitToast(NSTimeInterval seconds) {
     sShareLinkHost = [[NSUserDefaults standardUserDefaults] integerForKey:UDKeyShareLinkHost];
     if (sShareLinkHost < ShareLinkHostDefault || sShareLinkHost > ShareLinkHostFXReddit) sShareLinkHost = ShareLinkHostDefault;
     sShowUserAvatars = [[NSUserDefaults standardUserDefaults] boolForKey:UDKeyShowUserAvatars];
+    sHideAllUserAvatars = [standardDefaults boolForKey:UDKeyHideAllUserAvatars];
+    sHideFeedPostImages = [standardDefaults boolForKey:UDKeyHideFeedPostImages];
     sUseProfileAvatarTabIcon = [[NSUserDefaults standardUserDefaults] boolForKey:UDKeyUseProfileAvatarTabIcon];
     sHideTabBarTitles = [[NSUserDefaults standardUserDefaults] boolForKey:UDKeyHideTabBarTitles];
     sUnreadBadgeCompactTabBar = [[NSUserDefaults standardUserDefaults] boolForKey:UDKeyUnreadBadgeCompactTabBar];
