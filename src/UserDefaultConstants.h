@@ -155,6 +155,9 @@ static NSString *const UDKeyEnableFlairColors = @"EnableFlairColors";
 // posts, crossposts, comment post context). Appearance > Posts > Bold Post
 // Titles; default NO. See ApolloBoldPostTitles.xm.
 static NSString *const UDKeyBoldPostTitles = @"BoldPostTitles";
+// Overrides all user avatar renderers (inline, profile, tab icon, modern chat).
+// Opt-in, default OFF. Does not affect subreddit icons or post media.
+static NSString *const UDKeyHideAllUserAvatars = @"ApolloHideAllUserAvatars";
 static NSString *const ApolloFlairColorsChangedNotification = @"ApolloFlairColorsChangedNotification";
 static NSString *const UDKeyReadPostMaxCount = @"ReadPostMaxCount";
 // Hidden & Deleted's Posts tab: YES = compact posts, NO = large thumbnails.
@@ -778,6 +781,8 @@ static NSString *const UDKeyUpdateSkippedVersion = @"UpdateSkippedVersion"; // "
 
 // Feed thumbnails for text posts with embedded images (off = native behavior).
 static NSString *const UDKeyFeedTextPostThumbnails = @"FeedTextPostThumbnails";
+// Hide images/gallery previews in feed cards only; detail pages keep their media.
+static NSString *const UDKeyHideFeedPostImages = @"HideFeedPostImages";
 // Restores the last feed, open post and reading position after process eviction.
 // Default NO. Turning it off deletes any saved or pending reading session.
 static NSString *const UDKeyRestoreReadingSession = @"RestoreReadingSession";

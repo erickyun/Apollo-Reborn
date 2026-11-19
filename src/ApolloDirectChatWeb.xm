@@ -322,6 +322,9 @@ static NSString *ApolloDirectChatEnhancementScript(NSDictionary *palette) {
     NSString *json = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] ?: @"{}";
     NSMutableString *script = [NSMutableString stringWithString:@"(()=>{const palette="];
     [script appendString:json];
+    // The page enhancement stylesheet runs in each open shadow root. This
+    // value is read from the native preference when the script is installed.
+    [script appendFormat:@";const hideUserAvatars=%@;", sHideAllUserAvatars ? @"true" : @"false"];
     [script appendString:@";"
         "window.__apolloChatPalette=palette;window.__apolloChatShadowRoots=window.__apolloChatShadowRoots||[];"
         // The selected-section marker is a plain window global, so Reddit's
@@ -417,6 +420,10 @@ static NSString *ApolloDirectChatEnhancementScript(NSDictionary *palette) {
         "if(seen.includes(u))continue;seen.push(u);added++;while(seen.length>24)seen.shift();}return added;};"
         "const mailAvatarHold=()=>!mailRoute()?'':window.__apolloMailAvatarSrcs.map(u=>"
         "`img[src=\"${u}\"]{background-image:url(\"${u}\")!important;background-size:cover!important;background-position:center!important;background-repeat:no-repeat!important;}`).join('');"
+        // Hide user-avatar elements without matching subreddit icons, GIFs,
+        // image attachments, or post media. Shadow roots receive this through
+        // themeRoot() on every sweep, including virtualized Chat/Modmail rows.
+        "const avatarPrivacyCSS=()=>!hideUserAvatars?'':'.user-avatar,rs-avatar,faceplate-avatar,[data-testid=\\\"user-avatar\\\"],[data-testid=\\\"avatar\\\"],img[src*=\\\"/avatars/\\\"]{visibility:hidden!important;}';"
         "const css=()=>`:host,:root{"
             "--apollo-chat-accent:${palette.accent};--apollo-chat-bg:${palette.primary};--apollo-chat-surface:${palette.secondary};--apollo-chat-raised:${palette.tertiary};--apollo-chat-border:${palette.separator};--apollo-chat-text:${palette.text};--apollo-chat-muted:${palette.secondaryText};--apollo-chat-font:${palette.font};"
             "--font-sans:var(--apollo-chat-font)!important;--font-family-sans:var(--apollo-chat-font)!important;font-family:var(--apollo-chat-font)!important;"
@@ -426,7 +433,7 @@ static NSString *ApolloDirectChatEnhancementScript(NSDictionary *palette) {
             "--color-tone-1:${palette.text}!important;--color-tone-2:${palette.secondaryText}!important;--color-tone-3:${palette.secondaryText}!important;--color-tone-4:${palette.separator}!important;--color-tone-5:${palette.tertiary}!important;--color-tone-6:${palette.secondary}!important;--color-tone-7:${palette.primary}!important;"
             "--newCommunityTheme-body:${palette.primary}!important;--newCommunityTheme-bodyText:${palette.text}!important;--newCommunityTheme-button:${palette.accent}!important;--newCommunityTheme-line:${palette.separator}!important;"
         "}html,body,button,input,textarea,select{font-family:var(--apollo-chat-font)!important;}html,body{background-color:var(--apollo-chat-bg)!important;color:var(--apollo-chat-text)!important;-webkit-text-size-adjust:${textScale()}%!important;text-size-adjust:${textScale()}%!important;}body{accent-color:var(--apollo-chat-accent)!important;}a{color:var(--apollo-chat-accent)!important;}input,textarea,[contenteditable=true]{caret-color:var(--apollo-chat-accent)!important;font-size:16px!important;}::selection{background:var(--apollo-chat-accent)!important;color:var(--apollo-chat-bg)!important;}"
-        "shreddit-app{--page-y-padding:0px!important;padding-top:0!important;}header.v2.hui{display:none!important;}modmail-mailbox-wrapper{top:0!important;margin-top:0!important;}${mailLayout()}${chatTouchLayout()}${embeddedChrome()}${listTypography()}${mailAvatarHold()}"
+        "shreddit-app{--page-y-padding:0px!important;padding-top:0!important;}header.v2.hui{display:none!important;}modmail-mailbox-wrapper{top:0!important;margin-top:0!important;}${mailLayout()}${chatTouchLayout()}${embeddedChrome()}${listTypography()}${mailAvatarHold()}${avatarPrivacyCSS()}"
         // A press-and-hold on a chat-list row used to bring up WebKit's stock
         // link menu — the rows are links to Reddit's client-side /room/… routes,
         // which do not exist as pages, so the preview was a 404 — and start a

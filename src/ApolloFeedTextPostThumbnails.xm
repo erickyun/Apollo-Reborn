@@ -739,7 +739,7 @@ static void ApolloFeedReapplyCleanup(id node, BOOL triggerLayout) {
 
 - (id)layoutSpecThatFits:(struct ApolloFeedThumbSizeRange)constrainedSize {
     id spec = %orig;
-    if (!sFeedTextPostThumbnails) return spec;
+    if (sHideFeedPostImages || !sFeedTextPostThumbnails) return spec;
     @try {
         RDKLink *link = MSHookIvar<RDKLink *>(self, "link");
         NSURL *url = ApolloFeedThumbnailURLForLink(link);
@@ -841,7 +841,7 @@ static void ApolloFeedReapplyCleanup(id node, BOOL triggerLayout) {
 
 - (id)layoutSpecThatFits:(struct ApolloFeedThumbSizeRange)constrainedSize {
     id origSpec = %orig;
-    if (!sFeedTextPostThumbnails) {
+    if (sHideFeedPostImages || !sFeedTextPostThumbnails) {
         // Toggled off mid-session: a previously injected hero would otherwise
         // keep its last frame even though it left the layout spec.
         ASDisplayNode *staleHero = objc_getAssociatedObject(self, &kApolloFeedHeroNodeKey);

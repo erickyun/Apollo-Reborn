@@ -37,6 +37,8 @@
 #import <objc/runtime.h>
 
 #import "ApolloCommon.h"
+#import "ApolloState.h"
+#import "UserDefaultConstants.h"
 #import "settings/ApolloSettingsGeneralTable.h"
 #import "settings/ApolloSettingsRouter.h"
 #import "ApolloThemeRuntime.h"
@@ -87,6 +89,140 @@ static void ApolloRegisterGeneralDisclosureRow(NSString *title,
         });
 }
 
+// Post/comment author-visibility preference (display-only, defaults off).
+// The cell is cached per General screen, just like other injected rows.
+static const void *kApolloHideAuthorsCellKey = &kApolloHideAuthorsCellKey;
+static NSString *const kApolloHideAuthorsPrefKey = @"ApolloHidePostCommentUsernames";
+static const void *kApolloHidePostInfoUserCellKey = &kApolloHidePostInfoUserCellKey;
+static NSString *const kApolloHidePostInfoUserPrefKey = @"ApolloHideUsernamesInPostInfo";
+
+@interface ApolloHideAuthorsToggleTarget : NSObject
++ (instancetype)sharedTarget;
+- (void)visibilityChanged:(UISwitch *)sender;
+- (void)postInfoVisibilityChanged:(UISwitch *)sender;
+- (void)avatarVisibilityChanged:(UISwitch *)sender;
+@end
+
+@implementation ApolloHideAuthorsToggleTarget
++ (instancetype)sharedTarget {
+    static ApolloHideAuthorsToggleTarget *target;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ target = [self new]; });
+    return target;
+}
+- (void)visibilityChanged:(UISwitch *)sender {
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kApolloHideAuthorsPrefKey];
+    // Native post feeds refresh via this same appearance notification.
+    // Open comment threads should be reopened to rebuild their text nodes.
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"com.christianselig.PostCellAppearanceUpdated" object:nil];
+}
+
+- (void)postInfoVisibilityChanged:(UISwitch *)sender {
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kApolloHidePostInfoUserPrefKey];
+    // Independent of "Hide Author Usernames". Ask feed cells to refresh.
+    // Restart Apollo once after upgrading from the old whole-row-hiding IPA
+    // to restore the PostInfoNode views that version left hidden.
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"com.christianselig.PostCellAppearanceUpdated" object:nil];
+}
+
+- (void)avatarVisibilityChanged:(UISwitch *)sender {
+    sHideAllUserAvatars = sender.on;
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:UDKeyHideAllUserAvatars];
+    // Ask native profile headers, tab bar and inline avatar cell binders to
+    // refresh. Existing web Chat/Modmail documents adopt the setting on reopen.
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"ApolloUserAvatarsToggleChangedNotification" object:nil];
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"ApolloProfileTabAvatarIconChangedNotification" object:nil];
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"com.christianselig.PostCellAppearanceUpdated" object:nil];
+}
+@end
+
+static UITableViewCell *ApolloHideAuthorsSettingsCell(UIViewController *vc, UITableViewCell *donor) {
+    UITableViewCell *cell = objc_getAssociatedObject(vc, kApolloHideAuthorsCellKey);
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+        cell.textLabel.text = @"Hide Author Usernames";
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
+        toggle.accessibilityLabel = @"Hide Author Usernames in Posts and Comments";
+        [toggle addTarget:[ApolloHideAuthorsToggleTarget sharedTarget]
+                   action:@selector(visibilityChanged:)
+         forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+        objc_setAssociatedObject(vc, kApolloHideAuthorsCellKey, cell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [(UISwitch *)cell.accessoryView setOn:
+        [NSUserDefaults.standardUserDefaults boolForKey:kApolloHideAuthorsPrefKey] animated:NO];
+    if (donor) {
+        cell.backgroundColor = donor.backgroundColor;
+        cell.textLabel.font = donor.textLabel.font;
+        cell.textLabel.textColor = donor.textLabel.textColor;
+    }
+    return cell;
+}
+
+// Second independent toggle: hide only the PostInfoNode's author button,
+// not the whole row. This preserves subreddit, vote count, comment count,
+// posting time, and other nearby metadata. Existing preference key is kept.
+static UITableViewCell *ApolloHidePostInfoUserSettingsCell(UIViewController *vc,
+                                                           UITableViewCell *donor) {
+    UITableViewCell *cell = objc_getAssociatedObject(vc, kApolloHidePostInfoUserCellKey);
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+        cell.textLabel.text = @"Hide Post Author";
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
+        toggle.accessibilityLabel = @"Hide post author while preserving votes comments subreddit and posting time";
+        [toggle addTarget:[ApolloHideAuthorsToggleTarget sharedTarget]
+                   action:@selector(postInfoVisibilityChanged:)
+         forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+        objc_setAssociatedObject(vc, kApolloHidePostInfoUserCellKey, cell,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [(UISwitch *)cell.accessoryView setOn:
+        [NSUserDefaults.standardUserDefaults boolForKey:kApolloHidePostInfoUserPrefKey]
+                                  animated:NO];
+    if (donor) {
+        cell.backgroundColor = donor.backgroundColor;
+        cell.textLabel.font = donor.textLabel.font;
+        cell.textLabel.textColor = donor.textLabel.textColor;
+    }
+    return cell;
+}
+
+// Independent from the existing "Show User Profile Pictures" toggle: the
+// preference is a temporary hide-only override and never modifies the user's
+// selected avatar layout/style choices.
+static const void *kApolloHideAllAvatarsCellKey = &kApolloHideAllAvatarsCellKey;
+
+static UITableViewCell *ApolloHideAllAvatarsSettingsCell(UIViewController *vc, UITableViewCell *donor) {
+    UITableViewCell *cell = objc_getAssociatedObject(vc, kApolloHideAllAvatarsCellKey);
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+        cell.textLabel.text = @"Hide All User Avatars";
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
+        toggle.accessibilityLabel = @"Hide User Profile Pictures Everywhere";
+        [toggle addTarget:[ApolloHideAuthorsToggleTarget sharedTarget]
+                   action:@selector(avatarVisibilityChanged:)
+         forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+        objc_setAssociatedObject(vc, kApolloHideAllAvatarsCellKey, cell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [(UISwitch *)cell.accessoryView setOn:sHideAllUserAvatars animated:NO];
+    if (donor) {
+        cell.backgroundColor = donor.backgroundColor;
+        cell.textLabel.font = donor.textLabel.font;
+        cell.textLabel.textColor = donor.textLabel.textColor;
+    }
+    return cell;
+}
+
 static const void *kApolloInjOpenInAppKey = &kApolloInjOpenInAppKey;
 static const void *kApolloInjFeedUnmuteKey = &kApolloInjFeedUnmuteKey;
 static const void *kApolloInjPiPKey = &kApolloInjPiPKey;
@@ -117,6 +253,24 @@ static const void *kApolloInjSavedCategoriesKey = &kApolloInjSavedCategoriesKey;
                                        @"Allow Save Categories",
                                        kApolloInjSavedCategoriesKey,
                                        @"saved-categories");
+
+    // One opt-in switch affects feed posts, post headers and comment authors.
+    // "Allow Save Categories" is a stable native General > Other anchor.
+    ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
+        ^UITableViewCell *(UIViewController *vc, UITableViewCell *donor) {
+            return ApolloHideAuthorsSettingsCell(vc, donor);
+        });
+
+    // The new toggle hides the post author's text only, not surrounding metadata.
+    ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
+        ^UITableViewCell *(UIViewController *vc, UITableViewCell *donor) {
+            return ApolloHidePostInfoUserSettingsCell(vc, donor);
+        });
+
+    ApolloGeneralTableInjectRow(@"Allow Save Categories", nil,
+        ^UITableViewCell *(UIViewController *vc, UITableViewCell *donor) {
+            return ApolloHideAllAvatarsSettingsCell(vc, donor);
+        });
 
     // Native rows relocated onto Reborn screens (see the header comment). The
     // mirrors read/write the same native keys, so hiding these is pure
