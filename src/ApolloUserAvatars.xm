@@ -3022,7 +3022,7 @@ static void ApolloInlineAvatarInfoRequestDidFinish(void) {
 // actually starts a fresh fetch for a username with no fetch in flight.
 static void ApolloInlineAvatarStartInfoRequest(id cell, NSString *username, BOOL piggyback) {
     if (!cell) return;
-    if (!ApolloInlineUserAvatarsEnabled() || !ApolloInlineAvatarCellUsernameMatches(cell, username) ||
+    if (!ApolloInlineAuthorAvatarEnabledForCell(cell) || !ApolloInlineAvatarCellUsernameMatches(cell, username) ||
         !ApolloBindInlineAvatarTextNodeForCell(cell, username)) {
         ApolloClearPendingInlineAvatarFetch(cell, username);
         return;
@@ -3048,7 +3048,7 @@ static void ApolloInlineAvatarStartInfoRequest(id cell, NSString *username, BOOL
         id cellNow = weakCell;
         if (!cellNow) return;
         ApolloClearPendingInlineAvatarFetch(cellNow, username);
-        if (!ApolloInlineUserAvatarsEnabled() || !info.iconURL) return;
+        if (!ApolloInlineAuthorAvatarEnabledForCell(cellNow) || !info.iconURL) return;
         ApolloApplyInlineAvatarInfoToCell(cellNow, username, info);
     }];
 }
@@ -3124,7 +3124,7 @@ static BOOL ApolloBindInlineAvatarTextNodeForCell(id cell, NSString *username) {
 
 static BOOL ApolloApplyInlineAvatarPlaceholderToCell(id cell, NSString *username) {
     username = ApolloAvatarNormalizedUsername(username);
-    if (!cell || username.length == 0 || !ApolloInlineUserAvatarsEnabled()) return NO;
+    if (!cell || username.length == 0 || !ApolloInlineAuthorAvatarEnabledForCell(cell)) return NO;
     if (!ApolloBindInlineAvatarTextNodeForCell(cell, username)) return NO;
 
     BOOL applied = ApolloApplyAvatarRenderToCell(cell, username, nil, nil, nil);
@@ -3152,7 +3152,7 @@ static void ApolloScheduleInlineAvatarLateReapplyForCell(id cell, NSString *user
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             id strongCell = weakCell;
             if (!strongCell) return;
-            if (!ApolloInlineUserAvatarsEnabled() || !ApolloInlineAvatarCellUsernameMatches(strongCell, username)) {
+            if (!ApolloInlineAuthorAvatarEnabledForCell(strongCell) || !ApolloInlineAvatarCellUsernameMatches(strongCell, username)) {
                 objc_setAssociatedObject(strongCell, kApolloAvatarPendingLateReapplyUsernameKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
                 return;
             }
@@ -3187,7 +3187,7 @@ static void ApolloScheduleInlineAvatarLateReapplyForCell(id cell, NSString *user
 
 static void ApolloApplyInlineAvatarInfoToCell(id cell, NSString *username, ApolloUserProfileInfo *info) {
     username = ApolloAvatarNormalizedUsername(username);
-    if (!cell || username.length == 0 || !ApolloInlineUserAvatarsEnabled() || !info.iconURL) return;
+    if (!cell || username.length == 0 || !ApolloInlineAuthorAvatarEnabledForCell(cell) || !info.iconURL) return;
     if (!ApolloBindInlineAvatarTextNodeForCell(cell, username)) return;
 
     ApolloUserProfileCache *cache = [ApolloUserProfileCache sharedCache];
@@ -3208,7 +3208,7 @@ static void ApolloApplyInlineAvatarInfoToCell(id cell, NSString *username, Apoll
     __weak id weakCell = cell;
     [cache requestImageForURL:info.iconURL completion:^(UIImage *loadedImage) {
         id cellNow = weakCell;
-        if (!cellNow || !ApolloInlineUserAvatarsEnabled() || !loadedImage) return;
+        if (!cellNow || !ApolloInlineAuthorAvatarEnabledForCell(cellNow) || !loadedImage) return;
         if (!ApolloBindInlineAvatarTextNodeForCell(cellNow, username)) return;
         UIImage *loadedDecoratorImage = info.decoratorURL ? [cache cachedImageForURL:info.decoratorURL] : nil;
         BOOL applied = ApolloApplyAvatarRenderToCell(cellNow, username, info, loadedImage, loadedDecoratorImage);
@@ -3355,7 +3355,7 @@ static void ApolloApplyAvatarToCellWithDiameter(id cell, NSString *username, CGF
         return;
     }
 
-    if (!ApolloInlineUserAvatarsEnabled()) {
+    if (!ApolloInlineAuthorAvatarEnabledForCell(cell)) {
         ApolloRestoreAvatarForCell(cell);
         return;
     }
@@ -3409,7 +3409,7 @@ static id ApolloAuthorTitleTextNodeForCell(id cell, NSString *username) {
 }
 
 static void ApolloBindAvatarAtMeasureForCell(id cell, NSString *modelIvarName, CGFloat diameter) {
-    if (!ApolloInlineUserAvatarsEnabled() || !cell) return;
+    if (!ApolloInlineAuthorAvatarEnabledForCell(cell)) return;
 
     // A re-measure of an already bound cell: nothing to do.
     id boundNode = objc_getAssociatedObject(cell, kApolloAvatarTextNodeKey);
@@ -5424,13 +5424,13 @@ struct CDStruct_90e057aa { CGSize min; CGSize max; };
 // handful of batched requests, and making the avatar already-present on scroll.
 - (void)didEnterPreloadState {
     %orig;
-    if (!ApolloInlineUserAvatarsEnabled()) return;
+    if (!ApolloInlineAuthorAvatarEnabledForCell(self)) return;
     ApolloInlineAvatarBatchEnqueueFromCommentCell(self);
 }
 
 - (void)didLoad {
     %orig;
-    if (!ApolloInlineUserAvatarsEnabled()) return;
+    if (!ApolloInlineAuthorAvatarEnabledForCell(self)) return;
     ApolloInlineAvatarBatchEnqueueFromCommentCell(self);
     ApolloApplyAvatarToCellWithDiameter(self, ApolloUsernameFromCell(self, @"comment"), ApolloCommentInlineAvatarDiameter);
 }
@@ -5449,13 +5449,13 @@ struct CDStruct_90e057aa { CGSize min; CGSize max; };
 // Limiting only) usually lands before the cell is on screen.
 - (void)didEnterPreloadState {
     %orig;
-    if (!ApolloInlineUserAvatarsEnabled()) return;
+    if (!ApolloInlineAuthorAvatarEnabledForCell(self)) return;
     ApolloInlineAvatarBatchEnqueueFromPostCell(self);
 }
 
 - (void)didLoad {
     %orig;
-    if (!ApolloInlineUserAvatarsEnabled()) return;
+    if (!ApolloInlineAuthorAvatarEnabledForCell(self)) return;
     ApolloApplyAvatarToCellWithDiameter(self, ApolloUsernameFromCell(self, @"link"), ApolloFeedInlineAvatarDiameter);
 }
 
@@ -5465,7 +5465,7 @@ struct CDStruct_90e057aa { CGSize min; CGSize max; };
 
 - (void)didLoad {
     %orig;
-    if (!ApolloInlineUserAvatarsEnabled()) return;
+    if (!ApolloInlineAuthorAvatarEnabledForCell(self)) return;
     ApolloApplyAvatarToCellWithDiameter(self, ApolloUsernameFromCell(self, @"link"), ApolloFeedInlineAvatarDiameter);
 }
 
@@ -5475,13 +5475,13 @@ struct CDStruct_90e057aa { CGSize min; CGSize max; };
 
 - (void)didEnterPreloadState {
     %orig;
-    if (!ApolloInlineUserAvatarsEnabled()) return;
+    if (!ApolloInlineAuthorAvatarEnabledForCell(self)) return;
     ApolloInlineAvatarBatchEnqueueFromPostCell(self);
 }
 
 - (void)didLoad {
     %orig;
-    if (!ApolloInlineUserAvatarsEnabled()) return;
+    if (!ApolloInlineAuthorAvatarEnabledForCell(self)) return;
     ApolloApplyAvatarToCellWithDiameter(self, ApolloUsernameFromCell(self, @"link"), ApolloFeedInlineAvatarDiameter);
 }
 
