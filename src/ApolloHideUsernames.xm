@@ -91,7 +91,7 @@ static NSAttributedString *ApolloPostTitleWithoutAuthor(NSAttributedString *inpu
             // Remove that adjacent avatar slot with the author, including
             // a U+FFFC slot whose attributes were lost in a text rewrite.
             // Do NOT remove any other attachment (such as subreddit icons).
-            if (left > 0 && [original characterAtIndex:left-1] == NSAttachmentCharacter) {
+            if (left > 0 && [original characterAtIndex:left-1] == 0xFFFC) {
                 start = left - 1;
                 left = start;
                 while (left > 0 &&
