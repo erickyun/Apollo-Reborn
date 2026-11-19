@@ -84,6 +84,19 @@ static NSAttributedString *ApolloPostTitleWithoutAuthor(NSAttributedString *inpu
             NSCharacterSet *spaces = [NSCharacterSet whitespaceCharacterSet];
             NSUInteger left = start;
             while (left > 0 && [spaces characterIsMember:[original characterAtIndex:left-1]]) left--;
+
+            // ApolloUserAvatars inserts an inline NSTextAttachment + spacer
+            // immediately BEFORE the author's name. Removing only the name
+            // leaves a dark circular placeholder next to votes/comments.
+            // Remove that adjacent avatar slot with the author, including
+            // a U+FFFC slot whose attributes were lost in a text rewrite.
+            // Do NOT remove any other attachment (such as subreddit icons).
+            if (left > 0 && [original characterAtIndex:left-1] == NSAttachmentCharacter) {
+                start = left - 1;
+                left = start;
+                while (left > 0 &&
+                       [spaces characterIsMember:[original characterAtIndex:left-1]]) left--;
+            }
             if (left > 0 && ([original characterAtIndex:left-1] == 0x00B7 ||
                              [original characterAtIndex:left-1] == 0x2022 ||
                              [original characterAtIndex:left-1] == '|')) {
