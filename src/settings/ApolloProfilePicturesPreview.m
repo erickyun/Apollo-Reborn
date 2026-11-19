@@ -1,6 +1,7 @@
 #import "ApolloProfilePicturesPreview.h"
 #import "ApolloCommon.h"
 #import "ApolloState.h"
+#import "ApolloAvatarVisibility.h"
 #import "ApolloThemeRuntime.h"
 #import "settings/ApolloSettingsTableViewController.h"
 
@@ -27,7 +28,7 @@
         [avatars addObject:(path ? [UIImage imageWithContentsOfFile:path] : nil) ?: [UIImage new]];
     }
     self.avatars = avatars;
-    self.avatarProgress = self.targetProgress = sShowUserAvatars ? 1 : 0;
+    self.avatarProgress = self.targetProgress = ApolloInlineUserAvatarsEnabled() ? 1 : 0;
     self.userInteractionEnabled = NO;
     self.isAccessibilityElement = YES;
     self.accessibilityLabel = @"Preview: a comment by Winter121921 and a reply by TheBean31415.";
@@ -44,7 +45,7 @@
 
 - (void)refresh {
     self.backgroundColor = ApolloThemeCardBackgroundColor() ?: UIColor.secondarySystemGroupedBackgroundColor;
-    CGFloat target = sShowUserAvatars ? 1 : 0;
+    CGFloat target = ApolloInlineUserAvatarsEnabled() ? 1 : 0;
     if (target != self.targetProgress) {
         [self.animation invalidate];
         self.animation = nil;
